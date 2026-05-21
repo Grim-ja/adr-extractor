@@ -653,7 +653,7 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                 delta = accumulate_divergence(d, new_related, new_reason)
                 d["divergence_score"] = round(d.get("divergence_score", 0.0) + delta, 3)
 
-                # history에 현재 상태 저장 (related_files 포함)
+                # history에 현재 상태 저장
                 d["history"] = d.get("history", []) + [{
                     "documentDate": d.get("documentDate", d.get("date")),
                     "commitDate": d.get("commitDate", ""),
@@ -674,6 +674,38 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                     d["title"] = op["title"]
                 if op.get("scope"):
                     d["scope"] = op["scope"]
+
+        elif op_type == "extend":
+            # 기존 reason은 보존, extensions 배열에 새 증거 추가
+            idx = find_idx(arr, id_=op_id, scope=op_scope)
+            if idx >= 0:
+                d = arr[idx]
+                new_related = op.get("related_files") or []
+                new_evidence = op.get("evidence", "")
+
+                # divergence score 누적 (extend도 동일 기준 적용)
+                delta = accumulate_divergence(d, new_related, new_evidence)
+                d["divergence_score"] = round(d.get("divergence_score", 0.0) + delta, 3)
+
+                # extensions 배열에 추가 (reason은 변경 안 함)
+                extension_entry = {
+                    "documentDate": today,
+                    "commitDate": commit_date,
+                    "evidence": new_evidence,
+                    "related_files": new_related,
+                }
+                d["extensions"] = d.get("extensions", []) + [extension_entry]
+                d["documentDate"] = today
+                d["commitDate"] = commit_date
+                # related_files는 union
+                existing = set(d.get("related_files", []))
+                for f in new_related:
+                    existing.add(f)
+                d["related_files"] = list(existing)
+
+        elif op_type == "merge":
+            # merge 제거 — superseded, 하위 호환을 위해 코드는 유지하되 무시
+            pass
 
         elif op_type == "prune":
             idx = find_idx(arr, id_=op_id, scope=op_scope)

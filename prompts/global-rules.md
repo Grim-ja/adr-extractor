@@ -53,22 +53,25 @@ Do not defend an existing ADR against contradicting evidence; revise it.
 # Relationship to Existing Decisions
 
 Always check existing decisions first:
-- Same principle already exists → **update** (enrich the reason)
-- Two similar decisions can be unified → **merge**
+- The existing explanation is incorrect or incomplete → **update** (correct or replace the reason)
+- New evidence enriches without contradicting the existing explanation → **extend** (add evidence, preserve the original reason)
 - New principle can be inferred from existing ones → **derive**
 - An existing decision is no longer valid → **prune**
 - Completely new decision only when nothing fits → **add**
 
-Update an existing ADR only when the change alters the architectural decision itself —
+**update** replaces the reason — use when the existing explanation is wrong or needs correction.
+**extend** preserves the reason — use when the existing explanation remains valid but new evidence adds detail.
+
+Update or extend an existing ADR only when the change touches the architectural decision itself —
 its tradeoffs, ownership model, lifecycle, boundary, or data flow.
-Do not update an ADR merely because an implementation detail changed within the same decision.
+Do not update or extend an ADR merely because an implementation detail changed within the same decision.
 Do not append to history merely because another module, domain, or file repeated an
 already-established pattern. Repetition is evidence the current explanation remains sufficient — not a reason to elaborate further.
 Append history only when the repetition changes the scope, boundary, tradeoff, or contract
 of the decision.
 
 **add is the last resort.** The goal is to maintain dense, composable context by enriching,
-merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
+deriving, and extending from existing decisions whenever possible — not to accumulate new ones.
 
 # No Significant Changes
 
@@ -103,17 +106,14 @@ or comments, prefix the `reason` field with `"Inferred:"`.
     {
       "op": "update",
       "id": "d-001",
-      "reason": "The principle this enriches or corrects — what new insight the diff reveals about the existing decision",
+      "reason": "The corrected or replaced explanation — use when the existing reason is wrong or incomplete",
       "related_files": ["relevant files"]
     },
     {
-      "op": "merge",
-      "source_ids": ["d-001", "d-002"],
-      "scope": "merged scope",
-      "title": "Title representing the unified decision",
-      "reason": "Why these two decisions are better expressed as one, and what the unified principle is",
-      "refs": [],
-      "related_files": []
+      "op": "extend",
+      "id": "d-002",
+      "evidence": "New observation that enriches without contradicting — the original reason is preserved",
+      "related_files": ["relevant files"]
     },
     {
       "op": "derive",
