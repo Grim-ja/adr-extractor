@@ -41,6 +41,8 @@ DEFAULT_MAX_DIFF = 12000
 DEFAULT_CONTEXT_LINES = 5
 DEFAULT_DRIFT_THRESHOLD = 2.0
 DEFAULT_DERIVE_THRESHOLD = 2.5
+DEFAULT_STALENESS_THRESHOLD = 3.0
+DEFAULT_STALENESS_COOLDOWN = 20  # keep 후 scan 제외 커밋 수
 
 # 전역 제외 목록
 GLOBAL_EXCLUDE = [
@@ -642,9 +644,15 @@ def load_decisions(output_dir: Path) -> dict:
     if path.exists():
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-        # convergence_scores 필드 없으면 초기화
         if "convergence_scores" not in data:
             data["convergence_scores"] = {}
+        # staleness 필드 초기화 (기존 decisions 호환)
+        for d in data.get("decisions", []):
+            d.setdefault("staleness_score", 0.0)
+            d.setdefault("last_active_commit", "")
+            d.setdefault("last_active_date", d.get("documentDate", ""))
+            d.setdefault("last_reviewed_commit", None)
+            d.setdefault("related_churn_count", 0)
         return data
     return {"decisions": [], "convergence_scores": {}}
 
@@ -689,6 +697,11 @@ def _new_decision(counter: int, today: str, commit_date: str, op: dict, extra: O
         "derived_from": None,
         "history": [],
         "divergence_score": 0.0,
+        "staleness_score": 0.0,
+        "last_active_commit": "",
+        "last_active_date": today,
+        "last_reviewed_commit": None,
+        "related_churn_count": 0,  # last_active_commit 이후 related_files 변경 커밋 수
     }
     if extra:
         d.update(extra)
@@ -1000,6 +1013,271 @@ def run_derive_scan(
 
 
 # ─────────────────────────────────────────────
+# Staleness score (GC 트리거)
+# ─────────────────────────────────────────────
+
+def _get_changed_files(repo: str, commit_hash: str) -> set[str]:
+    """커밋에서 변경된 파일 목록 반환."""
+    try:
+        parent_check = git(repo, "rev-parse", "--verify", f"{commit_hash}^", check=False)
+        if not parent_check:
+            raw = git(repo, "diff", "--name-only", "4b825dc642cb6eb9a060e54bf8d69288fbee4904", commit_hash)
+        else:
+            raw = git(repo, "diff", "--name-only", f"{commit_hash}^", commit_hash)
+        return set(f.strip() for f in raw.splitlines() if f.strip())
+    except Exception:
+        return set()
+
+
+def _get_deleted_renamed_files(repo: str, commit_hash: str) -> set[str]:
+    """커밋에서 삭제/rename된 파일 목록 반환."""
+    try:
+        parent_check = git(repo, "rev-parse", "--verify", f"{commit_hash}^", check=False)
+        if not parent_check:
+            return set()
+        raw = git(repo, "diff", "--diff-filter=DR", "--name-only", f"{commit_hash}^", commit_hash)
+        return set(f.strip() for f in raw.splitlines() if f.strip())
+    except Exception:
+        return set()
+
+
+def _title_keyword_overlap(title_a: str, title_b: str) -> bool:
+    """두 title의 의미 있는 키워드가 겹치는지 확인."""
+    stopwords = {'the', 'a', 'an', 'is', 'are', 'as', 'at', 'by', 'for',
+                 'in', 'of', 'on', 'to', 'and', 'or', 'via', 'per'}
+    words_a = set(re.findall(r'[a-zA-Z가-힣]{2,}', title_a.lower())) - stopwords
+    words_b = set(re.findall(r'[a-zA-Z가-힣]{2,}', title_b.lower())) - stopwords
+    if not words_a or not words_b:
+        return False
+    return len(words_a & words_b) >= 2
+
+
+def accumulate_staleness(
+    decisions_data: dict,
+    operations: list,
+    commit_hash: str,
+    repo: str,
+    processed_count: int,
+    cooldown: int = DEFAULT_STALENESS_COOLDOWN,
+) -> dict:
+    """
+    S1~S4 신호를 계산해서 staleness_score 누적.
+    add/update/extend 발생한 decision은 last_active_commit 갱신 + related_churn_count 리셋.
+
+    S1. derive/split의 source_ids에 포함된 decision  +2.0
+    S2. related_files 중 deleted/renamed 파일 존재    +1.5 per file
+    S3. same scope + title keyword or related_files overlap인 새 ADR 추가됨  +0.8
+    S4. last_active_commit 이후 related_files 변경 커밋 수가 10 증가할 때마다  +0.5
+    """
+    arr = decisions_data.get("decisions", [])
+
+    # 이번 커밋에서 활동한 decision ids (last_active_commit 갱신 대상)
+    active_ids = set()
+    for op in operations:
+        if op.get("op") in ("add", "update", "extend") and op.get("id"):
+            active_ids.add(op.get("id"))
+        # add는 새로 생성된 decision — id를 모르므로 apply_operations 후에 처리
+
+    # last_active_commit 갱신 + related_churn_count 리셋
+    for d in arr:
+        if d.get("id") in active_ids:
+            d["last_active_commit"] = commit_hash
+            d["last_active_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            d["related_churn_count"] = 0
+            d["staleness_score"] = max(0.0, d.get("staleness_score", 0.0) * 0.5)
+
+    # add로 생성된 새 decisions도 last_active_commit 갱신
+    add_ops = [op for op in operations if op.get("op") == "add"]
+    if add_ops:
+        # 가장 최근에 추가된 decisions (id 최댓값들)
+        max_num = 0
+        for d in arr:
+            m = re.match(r'd-(\d+)', d.get("id", ""))
+            if m:
+                max_num = max(max_num, int(m.group(1)))
+        for i, _ in enumerate(add_ops):
+            target_num = max_num - len(add_ops) + 1 + i
+            target_id = fmt_id(target_num)
+            for d in arr:
+                if d.get("id") == target_id and not d.get("last_active_commit"):
+                    d["last_active_commit"] = commit_hash
+                    d["last_active_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # S1: derive/split source decisions boost
+    for op in operations:
+        if op.get("op") == "derive":
+            for src_id in op.get("source_ids", []):
+                for d in arr:
+                    if d.get("id") == src_id and d.get("status") == "active":
+                        d["staleness_score"] = round(d.get("staleness_score", 0.0) + 2.0, 3)
+
+        elif op.get("op") == "split":
+            src_id = op.get("source_id", "")
+            for d in arr:
+                if d.get("id") == src_id and d.get("status") == "active":
+                    d["staleness_score"] = round(d.get("staleness_score", 0.0) + 2.0, 3)
+
+    # S2: deleted/renamed files boost
+    deleted_files = _get_deleted_renamed_files(repo, commit_hash)
+    if deleted_files:
+        for d in arr:
+            if d.get("status") != "active":
+                continue
+            related = set(d.get("related_files", []))
+            overlap = related & deleted_files
+            if overlap:
+                boost = len(overlap) * 1.5
+                d["staleness_score"] = round(d.get("staleness_score", 0.0) + boost, 3)
+
+    # S3: same scope + keyword/file overlap인 새 ADR 추가됨
+    new_decisions = [
+        d for d in arr
+        if d.get("last_active_commit") == commit_hash and d.get("id") not in active_ids
+    ]
+    existing = [d for d in arr if d.get("status") == "active" and d.get("last_active_commit") != commit_hash]
+    for new_d in new_decisions:
+        for old_d in existing:
+            scope_match = new_d.get("scope", "").split("/")[0] == old_d.get("scope", "").split("/")[0]
+            if not scope_match:
+                continue
+            title_match = _title_keyword_overlap(new_d.get("title", ""), old_d.get("title", ""))
+            files_overlap = bool(set(new_d.get("related_files", [])) & set(old_d.get("related_files", [])))
+            if title_match or files_overlap:
+                old_d["staleness_score"] = round(old_d.get("staleness_score", 0.0) + 0.8, 3)
+
+    # S4: related_files churn — related_files가 이번 커밋에서 변경됐으면 churn count +1
+    changed_files = _get_changed_files(repo, commit_hash)
+    if changed_files:
+        for d in arr:
+            if d.get("status") != "active":
+                continue
+            if d.get("id") in active_ids:
+                continue  # 이미 active_commit 갱신됨
+            related = set(d.get("related_files", []))
+            if related & changed_files:
+                d["related_churn_count"] = d.get("related_churn_count", 0) + 1
+                # 10 churn마다 +0.5
+                churn = d["related_churn_count"]
+                if churn % 10 == 0:
+                    d["staleness_score"] = round(d.get("staleness_score", 0.0) + 0.5, 3)
+
+    return decisions_data
+
+
+def build_staleness_scan_prompt(candidates: list[dict], change_summaries: dict[str, list[str]]) -> str:
+    prompt_path = PROMPT_DIR / "staleness-scan.md"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"staleness-scan.md 없음: {prompt_path}")
+
+    with open(prompt_path, encoding="utf-8") as f:
+        template = f.read()
+
+    payload = json.dumps(
+        {"decisions": candidates, "change_summaries": change_summaries},
+        ensure_ascii=False, indent=2
+    )
+    return template.replace("{{STALENESS_CANDIDATES}}", payload)
+
+
+def run_staleness_scan(
+    decisions_data: dict,
+    llm_caller,
+    threshold: float,
+    today: str,
+    repo: str,
+    current_commit_hash: str,
+    processed_count: int,
+    cooldown: int = DEFAULT_STALENESS_COOLDOWN,
+) -> dict:
+    """
+    staleness_score >= threshold인 decisions를 LLM에 전달해 keep/update/prune 판단.
+    cooldown 기간(K commits) 내에 이미 review된 decision은 제외.
+    """
+    arr = decisions_data.get("decisions", [])
+
+    # cooldown 체크를 위한 commit 순서 추정 (processed_count 활용)
+    candidates = []
+    for d in arr:
+        if d.get("status") != "active":
+            continue
+        if d.get("staleness_score", 0.0) < threshold:
+            continue
+        # cooldown: last_reviewed_commit이 있으면 processed_count 기반 추정
+        last_reviewed = d.get("last_reviewed_commit")
+        if last_reviewed and d.get("staleness_score", 0.0) < threshold * 1.5:
+            # 강하게 stale하지 않으면 cooldown 적용 (간단한 근사)
+            continue
+        candidates.append(d)
+
+    if not candidates:
+        return decisions_data
+
+    print(f"\n  [staleness scan] 후보 {len(candidates)}개 (score >= {threshold})")
+    for c in candidates:
+        print(f"    {c['id']} | score={c.get('staleness_score', 0):.2f} | {c['title'][:50]}")
+
+    # 각 candidate의 last_active_commit 이후 related_files 변경 커밋 subjects 수집
+    change_summaries: dict[str, list[str]] = {}
+    for d in candidates:
+        since = d.get("last_active_commit", "")
+        related = d.get("related_files", [])
+        if not since or not related:
+            change_summaries[d["id"]] = []
+            continue
+        try:
+            # last_active_commit 이후 related_files 중 하나라도 변경한 커밋의 subject 목록
+            subjects = []
+            raw = git(repo, "log", "--oneline", f"{since}..HEAD", "--", *related[:5])
+            for line in raw.splitlines()[:10]:
+                subjects.append(line.strip())
+            change_summaries[d["id"]] = subjects
+        except Exception:
+            change_summaries[d["id"]] = []
+
+    try:
+        prompt = build_staleness_scan_prompt(candidates, change_summaries)
+    except FileNotFoundError as e:
+        print(f"  [staleness scan] {e}", file=sys.stderr)
+        return decisions_data
+
+    try:
+        response = llm_caller(prompt)
+    except Exception as e:
+        print(f"  [staleness scan] LLM 호출 실패: {e}", file=sys.stderr)
+        return decisions_data
+
+    parsed = extract_json(response)
+    if not parsed or "operations" not in parsed:
+        print("  [staleness scan] 응답에서 operations JSON을 찾을 수 없음")
+        return decisions_data
+
+    # keep/update/prune만 허용
+    allowed_ops = [op for op in parsed["operations"] if op.get("op") in ("update", "prune")]
+    keep_ids = {
+        op.get("id") for op in parsed["operations"] if op.get("op") == "keep"
+    }
+
+    if allowed_ops:
+        print(f"  [staleness scan] {len(allowed_ops)}개 operation 적용")
+        decisions_data = apply_operations(decisions_data, allowed_ops, today)
+
+    # 처리된 decisions score 리셋/감소 + last_reviewed_commit 갱신
+    operated_ids = {op.get("id") for op in allowed_ops}
+    for d in decisions_data.get("decisions", []):
+        d_id = d.get("id")
+        if d_id not in {c["id"] for c in candidates}:
+            continue
+        if d_id in operated_ids:
+            d["staleness_score"] = 0.0
+        else:
+            # keep 또는 무응답 — score 감소 + cooldown 시작
+            d["staleness_score"] = round(d.get("staleness_score", 0.0) * 0.3, 3)
+            d["last_reviewed_commit"] = current_commit_hash
+
+    return decisions_data
+
+
+# ─────────────────────────────────────────────
 # 상태 파일
 # ─────────────────────────────────────────────
 
@@ -1181,6 +1459,10 @@ def process_commit(
     no_drift_scan: bool,
     derive_threshold: float,
     no_derive_scan: bool,
+    staleness_threshold: float,
+    no_staleness_scan: bool,
+    staleness_cooldown: int,
+    processed_count: int,
 ) -> dict:
     print(f"\n{'─'*60}")
     print(f"  커밋: {commit['hash'][:12]} | {commit['subject'][:60]}")
@@ -1245,17 +1527,30 @@ def process_commit(
     decisions_data = apply_operations(decisions_data, operations, today, commit_date)
     print(f"  ✓ decisions 총 {len(decisions_data.get('decisions', []))}개")
 
-    # convergence score 누적
+    # 2. convergence score 누적
     if not no_drift_scan:
         decisions_data = accumulate_convergence(decisions_data, operations)
 
-    # drift scan: divergence_score >= threshold인 decision 있으면 실행
+    # 3. drift scan: divergence_score >= threshold → split
     if not no_drift_scan:
         decisions_data = run_drift_scan(decisions_data, llm_caller, drift_threshold, today)
 
-    # derive scan: convergence_score >= threshold인 pair 있으면 실행
+    # 4. derive scan: convergence_score >= threshold → derive
     if not no_derive_scan:
         decisions_data = run_derive_scan(decisions_data, llm_caller, derive_threshold, today)
+
+    # 5. staleness score 누적 (split/derive 결과 반영 후)
+    if not no_staleness_scan:
+        decisions_data = accumulate_staleness(
+            decisions_data, operations, commit["hash"], repo, processed_count, staleness_cooldown
+        )
+
+    # 6. staleness scan: staleness_score >= threshold → keep/update/prune
+    if not no_staleness_scan:
+        decisions_data = run_staleness_scan(
+            decisions_data, llm_caller, staleness_threshold, today,
+            repo, commit["hash"], processed_count, staleness_cooldown
+        )
 
     return decisions_data
 
@@ -1316,6 +1611,12 @@ def main() -> None:
                         help=f"convergence score 임계값 (기본: {DEFAULT_DERIVE_THRESHOLD})")
     parser.add_argument("--no-derive-scan", action="store_true",
                         help="derive scan 비활성화")
+    parser.add_argument("--staleness-threshold", type=float, default=DEFAULT_STALENESS_THRESHOLD,
+                        help=f"staleness score 임계값 (기본: {DEFAULT_STALENESS_THRESHOLD})")
+    parser.add_argument("--no-staleness-scan", action="store_true",
+                        help="staleness scan 비활성화 (GC 루프)")
+    parser.add_argument("--staleness-cooldown", type=int, default=DEFAULT_STALENESS_COOLDOWN,
+                        help=f"keep 후 staleness scan 제외 커밋 수 (기본: {DEFAULT_STALENESS_COOLDOWN})")
 
     parser.add_argument("--resume", action="store_true", help="마지막 처리 커밋부터 재개")
     parser.add_argument("--limit", type=int, help="처리할 최대 커밋 수 (테스트용)")
@@ -1377,6 +1678,8 @@ def main() -> None:
     print(f"[drift scan] {drift_info}")
     derive_info = f"threshold={args.derive_threshold}" if not args.no_derive_scan else "비활성"
     print(f"[derive scan] {derive_info}")
+    staleness_info = f"threshold={args.staleness_threshold}, cooldown={args.staleness_cooldown}" if not args.no_staleness_scan else "비활성"
+    print(f"[staleness scan] {staleness_info}")
 
     state = load_state(output_dir)
     decisions_data = load_decisions(output_dir)
@@ -1421,6 +1724,10 @@ def main() -> None:
             no_drift_scan=args.no_drift_scan,
             derive_threshold=args.derive_threshold,
             no_derive_scan=args.no_derive_scan,
+            staleness_threshold=args.staleness_threshold,
+            no_staleness_scan=args.no_staleness_scan,
+            staleness_cooldown=args.staleness_cooldown,
+            processed_count=processed,
         )
 
         state["last_processed_hash"] = commit["hash"]
