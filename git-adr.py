@@ -40,6 +40,7 @@ FILTERS_FILENAME = ".adr-filters.yaml"
 DEFAULT_MAX_DIFF = 12000
 DEFAULT_CONTEXT_LINES = 5
 DEFAULT_DRIFT_THRESHOLD = 2.0
+DEFAULT_DERIVE_THRESHOLD = 2.5
 
 # 전역 제외 목록
 GLOBAL_EXCLUDE = [
@@ -566,15 +567,86 @@ def accumulate_divergence(decision: dict, new_related_files: list[str], new_reas
 
 
 # ─────────────────────────────────────────────
-# decisions.json 관리
+# Convergence score (derive 트리거)
 # ─────────────────────────────────────────────
+
+def _pair_key(id_a: str, id_b: str) -> str:
+    """항상 오름차순으로 정렬한 pair key."""
+    a, b = sorted([id_a, id_b])
+    return f"{a}:{b}"
+
+
+def _shared_scope_prefix(scope_a: str, scope_b: str) -> bool:
+    """두 scope가 같은 top-level prefix를 공유하는지."""
+    top_a = scope_a.split("/")[0] if scope_a else ""
+    top_b = scope_b.split("/")[0] if scope_b else ""
+    return bool(top_a and top_b and top_a == top_b)
+
+
+def accumulate_convergence(decisions_data: dict, operations: list) -> dict:
+    """
+    현재 커밋 operations에서 동시에 update/extend된 decision pair들을 추출하고
+    convergence_score를 누적.
+
+    세 가지 신호:
+    1. 같은 커밋에서 함께 update/extend — 공통 관심사 신호
+    2. scope prefix 공유 — 구조적 인접성
+    3. reason keyword overlap — 의미적 유사성
+    """
+    scores = decisions_data.get("convergence_scores", {})
+    arr = decisions_data.get("decisions", [])
+    id_map = {d["id"]: d for d in arr if d.get("status") == "active"}
+
+    # 이번 커밋에서 update/extend된 decision ids
+    touched_ids = [
+        op.get("id") for op in operations
+        if op.get("op") in ("update", "extend") and op.get("id") in id_map
+    ]
+
+    if len(touched_ids) < 2:
+        return decisions_data
+
+    # 같은 커밋에서 함께 건드려진 pair들
+    from itertools import combinations
+    for id_a, id_b in combinations(touched_ids, 2):
+        key = _pair_key(id_a, id_b)
+        delta = 0.0
+
+        d_a = id_map[id_a]
+        d_b = id_map[id_b]
+
+        # 신호 1: 같은 커밋에서 함께 update/extend
+        delta += 1.0
+
+        # 신호 2: scope prefix 공유
+        if _shared_scope_prefix(d_a.get("scope", ""), d_b.get("scope", "")):
+            delta += 0.8
+
+        # 신호 3: reason keyword overlap
+        overlap = _keyword_overlap(d_a.get("reason", ""), d_b.get("reason", ""))
+        if overlap > 0.30:
+            delta += 1.0
+        elif overlap > 0.15:
+            delta += 0.5
+
+        scores[key] = round(scores.get(key, 0.0) + delta, 3)
+
+    decisions_data["convergence_scores"] = scores
+    return decisions_data
+
+
+
 
 def load_decisions(output_dir: Path) -> dict:
     path = output_dir / DECISIONS_FILENAME
     if path.exists():
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
-    return {"decisions": []}
+            data = json.load(f)
+        # convergence_scores 필드 없으면 초기화
+        if "convergence_scores" not in data:
+            data["convergence_scores"] = {}
+        return data
+    return {"decisions": [], "convergence_scores": {}}
 
 
 def save_decisions(output_dir: Path, data: dict) -> None:
@@ -823,6 +895,110 @@ def run_drift_scan(
     return decisions_data
 
 
+def build_derive_scan_prompt(candidates: dict) -> str:
+    prompt_path = PROMPT_DIR / "derive-scan.md"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"derive-scan.md 없음: {prompt_path}")
+
+    with open(prompt_path, encoding="utf-8") as f:
+        template = f.read()
+
+    candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
+    return template.replace("{{DERIVE_CANDIDATES}}", candidates_json)
+
+
+def run_derive_scan(
+    decisions_data: dict,
+    llm_caller,
+    threshold: float,
+    today: str,
+) -> dict:
+    """
+    convergence_score >= threshold인 decision pair들을 LLM에 전달해 derive 여부 판단.
+    - derive 발생: 새 decision 추가, source decisions는 active 유지, pair score 리셋
+    - derive 불필요: 해당 pair score를 0.3배로 감소 (재검토 유예)
+    """
+    scores = decisions_data.get("convergence_scores", {})
+    arr = decisions_data.get("decisions", [])
+    id_map = {d["id"]: d for d in arr if d.get("status") == "active"}
+
+    # threshold 초과 pair 추출
+    candidate_pairs = [
+        (key, score) for key, score in scores.items()
+        if score >= threshold
+    ]
+
+    if not candidate_pairs:
+        return decisions_data
+
+    # pair의 decisions 조합 (둘 다 active인 것만)
+    valid_pairs = []
+    for key, score in candidate_pairs:
+        parts = key.split(":")
+        if len(parts) == 2 and parts[0] in id_map and parts[1] in id_map:
+            valid_pairs.append((key, score, id_map[parts[0]], id_map[parts[1]]))
+
+    if not valid_pairs:
+        return decisions_data
+
+    print(f"\n  [derive scan] 후보 pair {len(valid_pairs)}개 (score >= {threshold})")
+    for key, score, d_a, d_b in valid_pairs:
+        print(f"    {key} | score={score:.2f} | {d_a['title'][:30]} ↔ {d_b['title'][:30]}")
+
+    # LLM에 넘길 candidates 구성
+    seen_ids = set()
+    candidates = []
+    for _, _, d_a, d_b in valid_pairs:
+        for d in (d_a, d_b):
+            if d["id"] not in seen_ids:
+                candidates.append(d)
+                seen_ids.add(d["id"])
+
+    # pair 정보도 같이 넘김
+    pair_info = [{"pair": key, "score": score} for key, score, _, _ in valid_pairs]
+
+    try:
+        prompt = build_derive_scan_prompt({"decisions": candidates, "pairs": pair_info})
+    except FileNotFoundError as e:
+        print(f"  [derive scan] {e}", file=sys.stderr)
+        return decisions_data
+
+    try:
+        response = llm_caller(prompt)
+    except Exception as e:
+        print(f"  [derive scan] LLM 호출 실패: {e}", file=sys.stderr)
+        return decisions_data
+
+    parsed = extract_json(response)
+    if not parsed or "operations" not in parsed:
+        print("  [derive scan] 응답에서 operations JSON을 찾을 수 없음")
+        return decisions_data
+
+    # derive만 허용
+    derive_ops = [op for op in parsed["operations"] if op.get("op") == "derive"]
+    derived_source_sets = [set(op.get("source_ids", [])) for op in derive_ops]
+
+    if derive_ops:
+        print(f"  [derive scan] derive {len(derive_ops)}개 적용")
+        decisions_data = apply_operations(decisions_data, derive_ops, today)
+    else:
+        print(f"  [derive scan] derive 없음 — 후보 pair score 감소")
+
+    # 처리된 pair score 리셋 or 감소
+    for key, score, _, _ in valid_pairs:
+        was_derived = any(
+            all(pid in sset for pid in key.split(":"))
+            for sset in derived_source_sets
+        )
+        if was_derived:
+            scores[key] = 0.0
+        else:
+            scores[key] = round(score * 0.3, 3)
+
+    decisions_data["convergence_scores"] = scores
+    return decisions_data
+
+
 # ─────────────────────────────────────────────
 # 상태 파일
 # ─────────────────────────────────────────────
@@ -1003,6 +1179,8 @@ def process_commit(
     verbose: bool,
     drift_threshold: float,
     no_drift_scan: bool,
+    derive_threshold: float,
+    no_derive_scan: bool,
 ) -> dict:
     print(f"\n{'─'*60}")
     print(f"  커밋: {commit['hash'][:12]} | {commit['subject'][:60]}")
@@ -1067,9 +1245,17 @@ def process_commit(
     decisions_data = apply_operations(decisions_data, operations, today, commit_date)
     print(f"  ✓ decisions 총 {len(decisions_data.get('decisions', []))}개")
 
-    # drift scan: threshold 초과 decision이 있으면 즉시 실행
+    # convergence score 누적
+    if not no_drift_scan:
+        decisions_data = accumulate_convergence(decisions_data, operations)
+
+    # drift scan: divergence_score >= threshold인 decision 있으면 실행
     if not no_drift_scan:
         decisions_data = run_drift_scan(decisions_data, llm_caller, drift_threshold, today)
+
+    # derive scan: convergence_score >= threshold인 pair 있으면 실행
+    if not no_derive_scan:
+        decisions_data = run_derive_scan(decisions_data, llm_caller, derive_threshold, today)
 
     return decisions_data
 
@@ -1126,6 +1312,10 @@ def main() -> None:
                         help=f"divergence score 임계값 (기본: {DEFAULT_DRIFT_THRESHOLD})")
     parser.add_argument("--no-drift-scan", action="store_true",
                         help="drift scan 비활성화")
+    parser.add_argument("--derive-threshold", type=float, default=DEFAULT_DERIVE_THRESHOLD,
+                        help=f"convergence score 임계값 (기본: {DEFAULT_DERIVE_THRESHOLD})")
+    parser.add_argument("--no-derive-scan", action="store_true",
+                        help="derive scan 비활성화")
 
     parser.add_argument("--resume", action="store_true", help="마지막 처리 커밋부터 재개")
     parser.add_argument("--limit", type=int, help="처리할 최대 커밋 수 (테스트용)")
@@ -1185,6 +1375,8 @@ def main() -> None:
 
     drift_info = f"threshold={args.drift_threshold}" if not args.no_drift_scan else "비활성"
     print(f"[drift scan] {drift_info}")
+    derive_info = f"threshold={args.derive_threshold}" if not args.no_derive_scan else "비활성"
+    print(f"[derive scan] {derive_info}")
 
     state = load_state(output_dir)
     decisions_data = load_decisions(output_dir)
@@ -1227,6 +1419,8 @@ def main() -> None:
             verbose=args.verbose,
             drift_threshold=args.drift_threshold,
             no_drift_scan=args.no_drift_scan,
+            derive_threshold=args.derive_threshold,
+            no_derive_scan=args.no_derive_scan,
         )
 
         state["last_processed_hash"] = commit["hash"]
