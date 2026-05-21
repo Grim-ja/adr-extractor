@@ -836,17 +836,49 @@ def save_state(output_dir: Path, state: dict) -> None:
 # LLM 호출
 # ─────────────────────────────────────────────
 
+SCOPE_META: dict[str, dict[str, str]] = {
+    "implementation": {
+        "example": "src/api/auth or architecture/layers or src/components/common, etc.",
+        "description": "scope should reflect the code path or conceptual layer impacted\n"
+                       "(e.g., `src/api/auth`, `architecture/module-boundaries`, `src/components/common`, `infrastructure/docker`).",
+    },
+    "design": {
+        "example": "design-system/tokens or ux/feedback or design-system/accessibility, etc.",
+        "description": "scope should reflect the UI/UX concern\n"
+                       "(e.g., `design-system/tokens`, `ux/form-patterns`, `design-system/accessibility`, `ux/navigation`).",
+    },
+    "planning": {
+        "example": "domain/user or product/billing or policy/access, etc.",
+        "description": "scope should reflect the product or domain area\n"
+                       "(e.g., `domain/subscription`, `product/onboarding`, `policy/access-control`, `domain/notification`).",
+    },
+}
+
+
 def build_prompt(target: str, commit: dict, diff: str, existing_canonical: list) -> str:
     prompt_path = PROMPT_DIR / f"{target}.md"
+    global_rules_path = PROMPT_DIR / "global-rules.md"
+
     if not prompt_path.exists():
-        available = [p.stem for p in PROMPT_DIR.glob("*.md")]
+        available = [p.stem for p in PROMPT_DIR.glob("*.md") if p.stem != "global-rules"]
         raise FileNotFoundError(
             f"프롬프트 파일이 없습니다: {prompt_path}\n"
             f"사용 가능한 타겟: {', '.join(available)}"
         )
 
     with open(prompt_path, encoding="utf-8") as f:
-        template = f.read()
+        target_template = f.read()
+
+    with open(global_rules_path, encoding="utf-8") as f:
+        global_template = f.read()
+
+    # 타겟별 scope 메타 치환
+    meta = SCOPE_META.get(target, {"example": "...", "description": ""})
+    global_template = global_template.replace("{{SCOPE_EXAMPLE}}", meta["example"])
+    global_template = global_template.replace("{{SCOPE_DESCRIPTION}}", meta["description"])
+
+    # 타겟 + 글로벌 룰 조합
+    template = target_template + "\n\n" + global_template
 
     canonical_summary = json.dumps(existing_canonical[:50], ensure_ascii=False, indent=2)
 

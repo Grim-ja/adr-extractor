@@ -31,17 +31,13 @@ permissions, business rules, and product behavior — not code.
 
 Analyze the diff and extract product planning decisions.
 
-## Core Judgment Criteria
+## Additional Judgment Criteria
 
-Ask two questions to determine if something is a planning decision:
+Ask two questions specific to planning decisions:
 1. **If a planner knows this, does it affect other planning decisions?**
 2. **Can it be expressed in product language (WHAT the system does) rather than technical language (HOW it does it)?**
 
 If both apply, extract it. If the second cannot be satisfied, discard it.
-
-Before extracting, also ask:
-**"Would this still be worth documenting if the commit hash and implementation diff were unavailable?"**
-If the value comes from the implementation detail rather than the product intent — do not extract.
 
 ## Describing Decisions: WHAT not HOW
 
@@ -71,65 +67,17 @@ When inference is required (no direct evidence in diff), state it explicitly:
 - External service integration scope (what third-party connects and at what level)
 - Locale / internationalization scope
 
-## What NOT to Extract
+## Additional: What NOT to Extract
 
 - Implementation details, library choices, code structure
 - Technical decisions with no impact on planning decisions
-- Bug fixes
 - Configuration or parameter changes with no product behavior change
 - Internal workflow or process changes with no user-facing effect
 
-## Relationship to Existing Decisions
-
-Always check existing decisions first:
-- Same principle already exists → **update** (enrich the reason)
-- Two similar decisions can be unified → **merge**
-- New principle can be inferred from existing ones → **derive**
-- An existing decision is no longer valid → **prune**
-- Completely new decision only when nothing fits → **add**
-
-Update an existing ADR only when the change alters the product decision itself —
-its business rules, user permissions, lifecycle policies, domain boundaries, or workflow.
-Do not update an ADR merely because an implementation detail changed within the same decision.
-
-**add is the last resort.** The goal is to maintain dense, composable context by enriching,
-merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
-
-## No Significant Changes
-
-If no meaningful planning decision is found in the diff, return `"operations": []`.
-
-# Output Format
-
-Return the following JSON in a **```json ... ``` code block**. One brief line of explanation is fine.
+## Additional: Output Rules
 
 All text fields (title, reason, alternatives, consequences) must use **product and business domain language**.
 Do not use developer terms — describe what the system does for users and the business.
-
-**The `title` field is mandatory for every operation.**
-
-```json
-{
-  "operations": [
-    {
-      "op": "add",
-      "scope": "domain/user or product/billing or policy/access, etc.",
-      "title": "One-line summary in product language (max 40 chars, required)",
-      "reason": "What this decision means for the product — WHAT-focused, 2-4 sentences. If the decision is inferred from code changes rather than explicitly stated in docs, commit messages, or comments, prefix with \"Inferred:\".",
-      "alternatives": ["Alternative that was considered, in product terms"],
-      "consequences": ["Impact and trade-offs, in product terms"],
-      "refs": [],
-      "related_files": ["File paths that provide evidence for this decision"]
-    },
-    {
-      "op": "update",
-      "id": "d-001",
-      "reason": "What enriches or corrects the existing reason — in product language",
-      "related_files": ["relevant files"]
-    }
-  ]
-}
-```
 
 scope should reflect the product or domain area
 (e.g., `domain/subscription`, `product/onboarding`, `policy/access-control`, `domain/notification`).
