@@ -39,6 +39,10 @@ Ask two questions to determine if something is a planning decision:
 
 If both apply, extract it. If the second cannot be satisfied, discard it.
 
+Before extracting, also ask:
+**"Would this still be worth documenting if the commit hash and implementation diff were unavailable?"**
+If the value comes from the implementation detail rather than the product intent — do not extract.
+
 ## Describing Decisions: WHAT not HOW
 
 Always describe decisions in terms of system behavior, not implementation:
@@ -72,6 +76,8 @@ When inference is required (no direct evidence in diff), state it explicitly:
 - Implementation details, library choices, code structure
 - Technical decisions with no impact on planning decisions
 - Bug fixes
+- Configuration or parameter changes with no product behavior change
+- Internal workflow or process changes with no user-facing effect
 
 ## Relationship to Existing Decisions
 
@@ -81,6 +87,10 @@ Always check existing decisions first:
 - New principle can be inferred from existing ones → **derive**
 - An existing decision is no longer valid → **prune**
 - Completely new decision only when nothing fits → **add**
+
+Update an existing ADR only when the change alters the product decision itself —
+its business rules, user permissions, lifecycle policies, domain boundaries, or workflow.
+Do not update an ADR merely because an implementation detail changed within the same decision.
 
 **add is the last resort.** The goal is to maintain dense, composable context by enriching,
 merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
@@ -105,7 +115,7 @@ Do not use developer terms — describe what the system does for users and the b
       "op": "add",
       "scope": "domain/user or product/billing or policy/access, etc.",
       "title": "One-line summary in product language (max 40 chars, required)",
-      "reason": "What this decision means for the product — WHAT-focused, 2-4 sentences.",
+      "reason": "What this decision means for the product — WHAT-focused, 2-4 sentences. If the decision is inferred from code changes rather than explicitly stated in docs, commit messages, or comments, prefix with \"Inferred:\".",
       "alternatives": ["Alternative that was considered, in product terms"],
       "consequences": ["Impact and trade-offs, in product terms"],
       "refs": [],

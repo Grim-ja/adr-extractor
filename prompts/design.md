@@ -31,6 +31,12 @@ tokens, accessibility, and user experience — not implementations.
 
 Analyze the diff and extract design decisions.
 
+## Core Judgment Criteria
+
+Before extracting, ask:
+**"Would this still be worth documenting if the commit hash and implementation diff were unavailable?"**
+If the value comes from the implementation detail rather than the design intent — do not extract.
+
 ## What to Extract
 
 Visual design (UI):
@@ -56,6 +62,8 @@ User experience (UX):
 - Simple color value / text changes
 - Bug fixes
 - Re-applying an existing pattern to a new file (no new decision)
+- Parameter or style value tuning with no design intent change
+- Minor component restructuring with no visual or interaction change
 
 ## Relationship to Existing Decisions
 
@@ -65,6 +73,10 @@ Always check existing decisions first:
 - New principle can be inferred from existing ones → **derive**
 - An existing decision is no longer valid → **prune**
 - Completely new decision only when nothing fits → **add**
+
+Update an existing ADR only when the change alters the design decision itself —
+its interaction model, visual language, accessibility approach, or system-wide pattern.
+Do not update an ADR merely because a visual detail changed within the same decision.
 
 **add is the last resort.** The goal is to maintain dense, composable context by enriching,
 merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
@@ -89,7 +101,7 @@ Do not use developer terms like "prop", "useState", "CSS class" — describe wha
       "op": "add",
       "scope": "design-system/tokens or ux/feedback or design-system/accessibility, etc.",
       "title": "One-line summary (max 40 chars, required)",
-      "reason": "Why this decision was made — include specific evidence from the diff. 2-4 sentences.",
+      "reason": "Why this decision was made — include specific evidence from the diff. 2-4 sentences. If the decision is inferred from code changes rather than explicitly stated in docs, commit messages, or comments, prefix with \"Inferred:\".",
       "alternatives": ["Alternative that was considered"],
       "consequences": ["Trade-offs of this decision"],
       "refs": [],
