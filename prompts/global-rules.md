@@ -27,6 +27,10 @@ Always check existing decisions first:
 Update an existing ADR only when the change alters the architectural decision itself —
 its tradeoffs, ownership model, lifecycle, boundary, or data flow.
 Do not update an ADR merely because an implementation detail changed within the same decision.
+Do not append to history merely because another module, domain, or file repeated an
+already-established pattern. Repetition is evidence the decision holds — not a reason to update.
+Append history only when the repetition changes the scope, boundary, tradeoff, or contract
+of the decision.
 
 **add is the last resort.** The goal is to maintain dense, composable context by enriching,
 merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
