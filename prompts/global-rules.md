@@ -1,12 +1,10 @@
-# Global Rules
-
-## Core Judgment Criteria
+# Core Judgment Criteria
 
 Before extracting, ask:
 **"Would this still be worth documenting if the commit hash and implementation diff were unavailable?"**
 If the value comes from the implementation detail rather than the design intent — do not extract.
 
-## What NOT to Extract
+# What NOT to Extract
 
 - Bug fixes (value changes only, no logic change)
 - Typo fixes, comment additions
@@ -17,7 +15,7 @@ If the value comes from the implementation detail rather than the design intent 
 - Small error handling or fallback syntax changes
 - Implementation detail changes within an already-documented decision
 
-## Relationship to Existing Decisions
+# Relationship to Existing Decisions
 
 Always check existing decisions first:
 - Same principle already exists → **update** (enrich the reason)
@@ -33,7 +31,7 @@ Do not update an ADR merely because an implementation detail changed within the 
 **add is the last resort.** The goal is to maintain dense, composable context by enriching,
 merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
 
-## No Significant Changes
+# No Significant Changes
 
 If no meaningful decision is found in the diff, return `"operations": []`.
 

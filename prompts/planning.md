@@ -67,14 +67,14 @@ When inference is required (no direct evidence in diff), state it explicitly:
 - External service integration scope (what third-party connects and at what level)
 - Locale / internationalization scope
 
-## Additional: What NOT to Extract
+## What NOT to Extract (additional)
 
 - Implementation details, library choices, code structure
 - Technical decisions with no impact on planning decisions
 - Configuration or parameter changes with no product behavior change
 - Internal workflow or process changes with no user-facing effect
 
-## Additional: Output Rules
+## Output Rules
 
 All text fields (title, reason, alternatives, consequences) must use **product and business domain language**.
 Do not use developer terms — describe what the system does for users and the business.

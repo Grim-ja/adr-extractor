@@ -51,13 +51,13 @@ User experience (UX):
 - Accessibility approach (ARIA, focus management, keyboard navigation)
 - Feedback patterns (how success/failure is communicated to users)
 
-## Additional: What NOT to Extract
+## What NOT to Extract (additional)
 
 - Simple color value / text changes
 - Parameter or style value tuning with no design intent change
 - Minor component restructuring with no visual or interaction change
 
-## Additional: Output Rules
+## Output Rules
 
 All text fields (title, reason, alternatives, consequences) must use **design and UX domain language**.
 Do not use developer terms like "prop", "useState", "CSS class" — describe what the user or designer experiences.

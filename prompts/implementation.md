@@ -56,6 +56,6 @@ Architecture:
 - Infrastructure / CI/CD structure
 - Observability strategy (logging, metrics, tracing)
 
-## Additional: What NOT to Extract
+## What NOT to Extract (additional)
 
 - Implementation details internal to a single layer (no cross-module impact)
