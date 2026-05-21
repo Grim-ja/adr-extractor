@@ -1,6 +1,6 @@
 # Role
 
-You are an expert in extracting Architecture Decision Records (ADR) from git history.
+You are an expert in UI/UX architecture decisions embedded in git history.
 Analyze the git diff below and extract **design decisions** — decisions about visual design and user experience
 that constrain how the product looks, feels, and behaves.
 
@@ -66,7 +66,8 @@ Always check existing decisions first:
 - An existing decision is no longer valid → **prune**
 - Completely new decision only when nothing fits → **add**
 
-**add is the last resort.** Prefer enriching or combining existing decisions.
+**add is the last resort.** The goal is to maintain dense, composable context by enriching,
+merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
 
 ## No Significant Changes
 
@@ -78,6 +79,8 @@ Return the following JSON in a **```json ... ``` code block**. One brief line of
 
 All text fields (title, reason, alternatives, consequences) must use **design and UX domain language**.
 Do not use developer terms like "prop", "useState", "CSS class" — describe what the user or designer experiences.
+
+**The `title` field is mandatory for every operation.**
 
 ```json
 {

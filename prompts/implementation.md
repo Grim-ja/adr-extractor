@@ -80,7 +80,8 @@ Always check existing decisions first:
 - An existing decision is no longer valid → **prune**
 - Completely new decision only when nothing fits → **add**
 
-**add is the last resort.** Prefer enriching or combining existing decisions.
+**add is the last resort.** The goal is to maintain dense, composable context by enriching,
+merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
 
 ## No Significant Changes
 
@@ -89,6 +90,8 @@ If no meaningful design decision is found in the diff, return `"operations": []`
 # Output Format
 
 Return the following JSON in a **```json ... ``` code block**. One brief line of explanation is fine.
+
+**The `title` field is mandatory for every operation.**
 
 ```json
 {

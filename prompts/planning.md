@@ -82,7 +82,8 @@ Always check existing decisions first:
 - An existing decision is no longer valid → **prune**
 - Completely new decision only when nothing fits → **add**
 
-**add is the last resort.** Prefer enriching or combining existing decisions.
+**add is the last resort.** The goal is to maintain dense, composable context by enriching,
+merging, and deriving from existing decisions whenever possible — not to accumulate new ones.
 
 ## No Significant Changes
 
@@ -94,6 +95,8 @@ Return the following JSON in a **```json ... ``` code block**. One brief line of
 
 All text fields (title, reason, alternatives, consequences) must use **product and business domain language**.
 Do not use developer terms — describe what the system does for users and the business.
+
+**The `title` field is mandatory for every operation.**
 
 ```json
 {
