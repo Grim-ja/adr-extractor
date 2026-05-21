@@ -74,6 +74,8 @@ merging, and deriving from existing decisions whenever possible — not to accum
 
 If no meaningful decision is found in the diff, return `"operations": []`.
 
+Output at most **8 operations per commit**. If more seem warranted, select only the most architecturally significant ones.
+
 # Output Format
 
 Return the following JSON in a **```json ... ``` code block**. One brief line of explanation is fine.
@@ -103,6 +105,47 @@ or comments, prefix the `reason` field with `"Inferred:"`.
       "id": "d-001",
       "reason": "The principle this enriches or corrects — what new insight the diff reveals about the existing decision",
       "related_files": ["relevant files"]
+    },
+    {
+      "op": "merge",
+      "source_ids": ["d-001", "d-002"],
+      "scope": "merged scope",
+      "title": "Title representing the unified decision",
+      "reason": "Why these two decisions are better expressed as one, and what the unified principle is",
+      "refs": [],
+      "related_files": []
+    },
+    {
+      "op": "derive",
+      "source_ids": ["d-003", "d-004"],
+      "scope": "architecture",
+      "title": "Higher-order principle inferred from existing decisions",
+      "reason": "The new principle or conclusion inferred from the source decisions",
+      "refs": []
+    },
+    {
+      "op": "prune",
+      "id": "d-005"
+    },
+    {
+      "op": "split",
+      "source_id": "d-006",
+      "into": [
+        {
+          "scope": "architecture",
+          "title": "First separated decision",
+          "reason": "Why this cluster deserves its own decision",
+          "refs": [],
+          "related_files": []
+        },
+        {
+          "scope": "architecture",
+          "title": "Second separated decision",
+          "reason": "Why this cluster deserves its own decision",
+          "refs": [],
+          "related_files": []
+        }
+      ]
     }
   ]
 }
