@@ -703,10 +703,6 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                     existing.add(f)
                 d["related_files"] = list(existing)
 
-        elif op_type == "merge":
-            # merge 제거 — superseded, 하위 호환을 위해 코드는 유지하되 무시
-            pass
-
         elif op_type == "prune":
             idx = find_idx(arr, id_=op_id, scope=op_scope)
             if idx >= 0:
@@ -727,25 +723,6 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                 "derived_from": op.get("source_ids", []),
             }))
             counter += 1
-
-        elif op_type == "merge":
-            sources = op.get("source_ids", [])
-            arr.append(_new_decision(counter, today, commit_date, op, {
-                "merged_from": sources,
-            }))
-            new_id = fmt_id(counter)
-            counter += 1
-            for d in arr:
-                if d.get("id") in sources:
-                    d["history"] = d.get("history", []) + [{
-                        "documentDate": d.get("documentDate", d.get("date")),
-                        "commitDate": d.get("commitDate", ""),
-                        "title": d.get("title"),
-                        "reason": d.get("reason"),
-                        "action": "merged",
-                        "merged_into": new_id,
-                    }]
-                    d["status"] = "superseded"
 
         elif op_type == "split":
             src_id = op.get("source_id", "")
