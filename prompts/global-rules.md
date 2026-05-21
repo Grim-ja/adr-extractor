@@ -28,6 +28,9 @@ The reason field must answer: **why was the system designed this way**, not **wh
 Prefer the simplest explanation that fits the observed evidence.
 If a simpler principle accounts for the same structural facts, use that instead of a more elaborate one.
 
+Ground every inferred principle in observable structural evidence from the diff.
+Do not infer organizational philosophy, product strategy, or engineering values unless directly supported.
+
 ADRs capture the strongest currently-supported explanation of the system's architectural structure.
 New evidence may refine or overturn that explanation.
 Do not defend an existing ADR against contradicting evidence; revise it.

@@ -5,7 +5,7 @@ Analyze the git diff below and identify **product planning decisions** — the p
 and business rules about what the system allows, prohibits, or guarantees.
 
 The diff is evidence. Your job is not to summarize what changed, but to articulate
-**why the system appears to be structured this way** and **what structural constraints or design tendencies the code currently reinforces**.
+**why the system appears to be structured this way** and **what structural constraints or architectural tendencies the code currently reinforces**.
 
 The audience for these ADRs is product managers, planners, and LLMs assisting them.
 Write all content using **product and business domain terminology** — not developer terminology.

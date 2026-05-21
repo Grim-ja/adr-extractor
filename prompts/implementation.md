@@ -5,7 +5,7 @@ Analyze the git diff below and identify **implementation decisions** — the con
 and principles embedded in the code that future contributors need to understand.
 
 The diff is evidence. Your job is not to summarize what changed, but to articulate
-**why the system appears to be structured this way** and **what structural constraints or design tendencies the code currently reinforces**.
+**why the system appears to be structured this way** and **what structural constraints or architectural tendencies the code currently reinforces**.
 
 # Commit Info
 

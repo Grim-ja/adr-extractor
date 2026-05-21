@@ -5,7 +5,7 @@ Analyze the git diff below and identify **design decisions** — the principles 
 about how the product looks, feels, and behaves that future contributors need to understand.
 
 The diff is evidence. Your job is not to summarize what changed, but to articulate
-**why the system appears to be structured this way** and **what structural constraints or design tendencies the code currently reinforces**.
+**why the system appears to be structured this way** and **what structural constraints or architectural tendencies the code currently reinforces**.
 
 The audience for these ADRs is designers, UX practitioners, and LLMs assisting them.
 Write all content using **design and UX domain terminology** — not developer terminology.
