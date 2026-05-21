@@ -37,36 +37,30 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 STATE_FILENAME = ".adr-state.json"
 DECISIONS_FILENAME = "decisions.json"
 FILTERS_FILENAME = ".adr-filters.yaml"
-DEFAULT_MAX_DIFF = 12000        # characters (roughly 3k tokens)
-DEFAULT_CONTEXT_LINES = 5       # git diff unified context lines
+DEFAULT_MAX_DIFF = 12000
+DEFAULT_CONTEXT_LINES = 5
+DEFAULT_DRIFT_THRESHOLD = 2.0
 
-# 전역 제외 목록 — 타겟 무관하게 항상 제외
+# 전역 제외 목록
 GLOBAL_EXCLUDE = [
-    # 패키지 락 파일
     "*.lock", "*.sum",
     "package-lock.json", "yarn.lock", "pnpm-lock.yaml",
     "Cargo.lock", "Gemfile.lock", "poetry.lock",
-    # 바이너리 / 압축
     "*.zip", "*.tar", "*.tar.gz", "*.tgz", "*.gz", "*.bz2", "*.xz",
     "*.7z", "*.rar", "*.jar", "*.war", "*.ear",
-    # 이미지
     "*.png", "*.jpg", "*.jpeg", "*.gif", "*.webp", "*.avif",
     "*.ico", "*.bmp", "*.tiff",
-    # 폰트
     "*.woff", "*.woff2", "*.ttf", "*.otf", "*.eot",
-    # 문서/미디어
     "*.pdf", "*.doc", "*.docx", "*.xls", "*.xlsx",
     "*.mp3", "*.mp4", "*.wav", "*.mov", "*.avi",
-    # 컴파일 산출물
     "*.pyc", "*.pyo", "*.class", "*.o", "*.so", "*.dll", "*.exe",
     "*.map",
-    # 스냅샷/생성 파일
     "*.snap",
     "*.min.js", "*.min.css",
     # AI 에이전트 지시/설정 파일 — 범용 툴 설정, 결정 기록 아님
     "CLAUDE.md", "AGENTS.md",
     ".cursorrules", "COPILOT-INSTRUCTIONS.md", ".github/copilot-instructions.md",
-    # 텍스트 상태/메모 파일 — 코드 아님
+    # 텍스트 상태/메모 파일
     "*.txt",
     # 경로 기반 제외
     ".git/*",
@@ -77,7 +71,6 @@ GLOBAL_EXCLUDE = [
     "vendor/*", ".venv/*", "venv/*", "env/*",
 ]
 
-# 타겟별 기본 include 패턴 — 없으면 전체 허용(GLOBAL_EXCLUDE만 적용)
 DEFAULT_TARGET_FILTERS: dict[str, dict] = {
     "implementation": {
         "include": [
@@ -91,15 +84,15 @@ DEFAULT_TARGET_FILTERS: dict[str, dict] = {
             "*.config.ts", "*.config.js", "*.config.mjs",
             "tsconfig*.json", "*.toml", "*.env.example",
             "prisma/**", "migrations/**", "schema.*",
-            "docs/**", "*.md",     # 개발 문서 포함
+            "docs/**", "*.md",
         ],
         "exclude": [
             "**/*.test.*", "**/*.spec.*", "**/__tests__/**",
             "**/*.stories.*",
             "**/styles/**", "**/tokens/**", "**/themes/**",
             "**/*.css", "**/*.scss", "**/*.sass", "**/*.less",
-            "**/*.sh",             # 스크립팅/운영 목적, 구현 결정 아님
-            "CHANGELOG.md",        # 릴리즈 로그, 결정 기록 아님
+            "**/*.sh",
+            "CHANGELOG.md",
             "TODOS.md",
         ],
     },
@@ -145,10 +138,8 @@ def matches_any(fpath: str, patterns: list[str]) -> bool:
     for pat in patterns:
         if fnmatch.fnmatch(fpath, pat):
             return True
-        # 경로의 각 부분에 대해서도 시도 (예: **/foo/** 패턴)
         if fnmatch.fnmatch(fpath, pat.lstrip("*/")):
             return True
-        # fnmatch는 ** 를 제대로 처리 못하므로 간단히 변환
         regex = _glob_to_regex(pat)
         if re.match(regex, fpath):
             return True
@@ -156,39 +147,29 @@ def matches_any(fpath: str, patterns: list[str]) -> bool:
 
 
 def _glob_to_regex(pat: str) -> str:
-    """glob 패턴을 정규식으로 변환 (** 지원)."""
     pat = pat.replace(".", r"\.")
-    pat = pat.replace("**", "\x00")   # ** 임시 치환
+    pat = pat.replace("**", "\x00")
     pat = pat.replace("*", "[^/]*")
-    pat = pat.replace("\x00", ".*")   # ** → 경로 포함 임의 문자열
+    pat = pat.replace("\x00", ".*")
     pat = pat.replace("?", "[^/]")
     return f"^{pat}$"
 
 
 def should_include_file(fpath: str, filters: dict) -> tuple[bool, str]:
-    """
-    파일을 포함할지 여부와 이유를 반환.
-    반환: (include: bool, reason: str)
-    """
-    # 1. 전역 제외 우선
     if matches_any(fpath, GLOBAL_EXCLUDE):
         return False, "global_exclude"
 
     include_pats = filters.get("include", [])
     exclude_pats = filters.get("exclude", [])
 
-    # 2. include 패턴이 없으면 전체 허용 (fallback)
     if not include_pats:
         if exclude_pats and matches_any(fpath, exclude_pats):
             return False, "target_exclude"
         return True, "no_include_filter"
 
-    # 3. include 매칭 확인
-    included = matches_any(fpath, include_pats)
-    if not included:
+    if not matches_any(fpath, include_pats):
         return False, "not_in_include"
 
-    # 4. exclude 매칭 확인
     if exclude_pats and matches_any(fpath, exclude_pats):
         return False, "target_exclude"
 
@@ -200,13 +181,6 @@ def should_include_file(fpath: str, filters: dict) -> tuple[bool, str]:
 # ─────────────────────────────────────────────
 
 def load_filters(repo: str, target: str, filters_file: Optional[str] = None) -> dict:
-    """
-    필터 로딩 우선순위:
-    1. --filters-file 명시적 지정
-    2. 레포 루트의 .adr-filters.yaml
-    3. DEFAULT_TARGET_FILTERS 기본값
-    """
-    # 명시적 파일 지정
     if filters_file:
         path = Path(filters_file)
         if path.exists():
@@ -214,7 +188,6 @@ def load_filters(repo: str, target: str, filters_file: Optional[str] = None) -> 
         else:
             print(f"  [경고] --filters-file '{filters_file}' 없음, 기본값 사용", file=sys.stderr)
 
-    # 레포 루트 .adr-filters.yaml
     repo_filters = Path(repo) / FILTERS_FILENAME
     if repo_filters.exists():
         parsed = _parse_filters_yaml(repo_filters, target)
@@ -222,7 +195,6 @@ def load_filters(repo: str, target: str, filters_file: Optional[str] = None) -> 
             print(f"  [filters] {repo_filters} 로드")
             return parsed
 
-    # 기본값
     return DEFAULT_TARGET_FILTERS.get(target, {})
 
 
@@ -238,13 +210,11 @@ def _parse_filters_yaml(path: Path, target: str) -> dict:
 
 
 def save_filters_yaml(repo: str, filters: dict) -> Path:
-    """LLM이 생성한 필터를 .adr-filters.yaml로 저장."""
     path = Path(repo) / FILTERS_FILENAME
     if HAS_YAML:
         with open(path, "w", encoding="utf-8") as f:
             yaml.dump(filters, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
     else:
-        # yaml 없으면 간단한 직렬화
         lines = []
         for tgt, cfg in filters.items():
             lines.append(f"{tgt}:")
@@ -262,21 +232,13 @@ def save_filters_yaml(repo: str, filters: dict) -> Path:
 # ─────────────────────────────────────────────
 
 def scan_repo_structure(repo: str, max_files: int = 300) -> str:
-    """
-    git ls-files로 파일 목록을 수집하고 디렉터리 구조 요약 반환.
-    LLM에게 레포 구조를 파악할 충분한 컨텍스트를 제공.
-    """
     raw = git(repo, "ls-files")
     all_files = [f for f in raw.splitlines() if f.strip()]
-
-    # GLOBAL_EXCLUDE 적용해서 노이즈 제거
     filtered = [f for f in all_files if not matches_any(f, GLOBAL_EXCLUDE)]
 
-    # 최대 파일 수 제한 (프롬프트 크기 관리)
     sample = filtered[:max_files]
     truncated = len(filtered) > max_files
 
-    # 디렉터리 트리 요약
     dirs: dict[str, int] = {}
     for f in filtered:
         parts = f.split("/")
@@ -374,7 +336,6 @@ planning:
 
 
 def generate_filters_with_llm(repo: str, llm_caller) -> Optional[dict]:
-    """LLM이 레포 구조를 보고 .adr-filters.yaml 내용을 생성."""
     print("  레포 구조 스캔 중...")
     structure = scan_repo_structure(repo)
 
@@ -387,7 +348,6 @@ def generate_filters_with_llm(repo: str, llm_caller) -> Optional[dict]:
         print(f"  [경고] 필터 생성 LLM 호출 실패: {e}", file=sys.stderr)
         return None
 
-    # YAML 블록 추출
     m = re.search(r'```yaml\s*([\s\S]*?)```', response)
     if not m:
         m = re.search(r'```\s*([\s\S]*?)```', response)
@@ -406,7 +366,6 @@ def generate_filters_with_llm(repo: str, llm_caller) -> Optional[dict]:
             print(f"  [경고] YAML 파싱 실패: {e}", file=sys.stderr)
             return None
     else:
-        # yaml 없으면 간단한 파싱 시도 (기본 구조만)
         print("  [경고] PyYAML 미설치. 기본 필터 사용. pip install pyyaml 권장.", file=sys.stderr)
         return None
 
@@ -414,16 +373,10 @@ def generate_filters_with_llm(repo: str, llm_caller) -> Optional[dict]:
 
 
 # ─────────────────────────────────────────────
-# diff 필터링 (타겟 적용)
+# diff 필터링
 # ─────────────────────────────────────────────
 
 def apply_target_filter(diff: str, filters: dict, verbose: bool = False) -> tuple[str, bool]:
-    """
-    diff에서 타겟 필터에 맞는 파일만 추출.
-    반환: (filtered_diff, used_fallback)
-
-    fallback 조건: 필터 적용 후 파일이 0개 → 전체 diff 반환 + 경고
-    """
     file_sections = re.split(r'(?=^diff --git )', diff, flags=re.MULTILINE)
     file_sections = [s for s in file_sections if s.strip()]
 
@@ -449,7 +402,6 @@ def apply_target_filter(diff: str, filters: dict, verbose: bool = False) -> tupl
                 print(f"    exclude ({reason}): {fpath}")
 
     if not included and excluded_count > 0:
-        # fallback: 필터가 모든 파일을 걸러냄 → 전체 반환
         print(
             f"  [fallback] 타겟 필터가 모든 파일을 제외함 ({excluded_count}개). "
             "전체 diff로 fallback.",
@@ -475,7 +427,6 @@ def git(repo: str, *args: str, check=True) -> str:
 
 
 def get_commits(repo: str, from_hash: Optional[str] = None) -> list[dict]:
-    """initial commit부터 최신 순서대로 커밋 목록 반환."""
     fmt = "%H\x1f%s\x1f%ai\x1f%an"
     raw = git(repo, "log", "--reverse", f"--format={fmt}")
     commits = []
@@ -500,7 +451,6 @@ def get_commits(repo: str, from_hash: Optional[str] = None) -> list[dict]:
 
 
 def get_diff(repo: str, commit_hash: str, context_lines: int = DEFAULT_CONTEXT_LINES) -> str:
-    """커밋의 diff를 반환. initial commit은 empty tree와 비교."""
     parent_check = git(repo, "rev-parse", "--verify", f"{commit_hash}^", check=False)
     if not parent_check:
         empty_tree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -508,12 +458,10 @@ def get_diff(repo: str, commit_hash: str, context_lines: int = DEFAULT_CONTEXT_L
     else:
         raw_diff = git(repo, "diff", f"--unified={context_lines}", f"{commit_hash}^", commit_hash)
 
-    # 전역 제외만 적용 (타겟 필터는 apply_target_filter에서 별도 처리)
     return _apply_global_exclude(raw_diff)
 
 
 def _apply_global_exclude(diff: str) -> str:
-    """GLOBAL_EXCLUDE만 적용한 diff 반환."""
     lines = diff.splitlines(keepends=True)
     result = []
     skip = False
@@ -531,7 +479,6 @@ def _apply_global_exclude(diff: str) -> str:
 
 
 def truncate_diff(diff: str, max_chars: int) -> str:
-    """diff가 너무 크면 파일별로 균등 분배 후 truncate."""
     if len(diff) <= max_chars:
         return diff
 
@@ -553,6 +500,69 @@ def truncate_diff(diff: str, max_chars: int) -> str:
     if len(result) > max_chars:
         result = result[:max_chars] + "\n... [truncated]"
     return result
+
+
+# ─────────────────────────────────────────────
+# Divergence score
+# ─────────────────────────────────────────────
+
+def _top_level_seams(files: list[str]) -> set[str]:
+    """파일 경로 목록에서 top-level 디렉터리(seam) 추출."""
+    seams = set()
+    for f in files:
+        parts = f.split("/")
+        seams.add(parts[0] if len(parts) > 1 else "__root__")
+    return seams
+
+
+def _keyword_overlap(text_a: str, text_b: str) -> float:
+    """두 텍스트의 의미 있는 단어 overlap 비율 (0~1). 높을수록 유사."""
+    if not text_a or not text_b:
+        return 1.0  # 비교 불가 → divergence 없음으로 처리
+
+    stopwords = {
+        '이', '가', '을', '를', '의', '에', '서', '과', '와', '은', '는', '도', '로', '하',
+        'the', 'a', 'an', 'is', 'are', 'was', 'were', 'to', 'of', 'in', 'for', 'on',
+        'with', 'at', 'by', 'from', 'as', 'and', 'or', 'but', 'not', 'this', 'that',
+        'it', 'its', 'be', 'been', 'being', 'have', 'has', 'had', 'do', 'does', 'did',
+    }
+
+    words_a = set(re.findall(r'[가-힣a-zA-Z]{2,}', text_a.lower())) - stopwords
+    words_b = set(re.findall(r'[가-힣a-zA-Z]{2,}', text_b.lower())) - stopwords
+
+    if not words_a or not words_b:
+        return 1.0
+
+    return len(words_a & words_b) / len(words_a | words_b)
+
+
+def accumulate_divergence(decision: dict, new_related_files: list[str], new_reason: str) -> float:
+    """
+    update 발생 시 divergence score increment를 deterministic하게 계산.
+
+    두 가지 신호:
+    1. Seam divergence: 새 related_files가 기존과 다른 top-level 경로를 포함
+    2. Reason divergence: 새 reason과 기존 reason의 키워드 overlap이 낮음
+    """
+    delta = 0.0
+
+    # 1. Seam divergence
+    current_seams = _top_level_seams(decision.get("related_files", []))
+    new_seams = _top_level_seams(new_related_files) if new_related_files else set()
+    if current_seams and new_seams:
+        novel_seams = new_seams - current_seams
+        delta += len(novel_seams) * 0.8
+
+    # 2. Reason divergence
+    current_reason = decision.get("reason", "")
+    if current_reason and new_reason:
+        overlap = _keyword_overlap(current_reason, new_reason)
+        if overlap < 0.15:
+            delta += 1.0
+        elif overlap < 0.30:
+            delta += 0.5
+
+    return delta
 
 
 # ─────────────────────────────────────────────
@@ -590,8 +600,30 @@ def find_idx(arr: list, id_: str = "", scope: str = "", pat: str = "") -> int:
     return -1
 
 
+def _new_decision(counter: int, today: str, commit_date: str, op: dict, extra: Optional[dict] = None) -> dict:
+    """새 decision 객체 생성 헬퍼."""
+    d = {
+        "id": fmt_id(counter),
+        "status": "active",
+        "documentDate": today,
+        "commitDate": commit_date,
+        "scope": op.get("scope", ""),
+        "title": op.get("title", ""),
+        "reason": op.get("reason", ""),
+        "alternatives": op.get("alternatives", []),
+        "consequences": op.get("consequences", []),
+        "refs": op.get("refs", []),
+        "related_files": op.get("related_files", []),
+        "derived_from": None,
+        "history": [],
+        "divergence_score": 0.0,
+    }
+    if extra:
+        d.update(extra)
+    return d
+
+
 def apply_operations(decisions_data: dict, operations: list, today: str, commit_date: str = "") -> dict:
-    """update-decisions.sh 로직을 Python으로 구현."""
     arr = decisions_data.get("decisions", [])
 
     max_num = 0
@@ -605,52 +637,46 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
         op_type = op.get("op", "")
         op_id = op.get("id", "")
         op_scope = op.get("scope", "")
-        op_pat = op.get("title_pattern", "")
 
         if op_type == "add":
-            arr.append({
-                "id": fmt_id(counter),
-                "status": "active",
-                "documentDate": today,
-                "commitDate": commit_date,
-                "scope": op_scope,
-                "title": op.get("title", ""),
-                "reason": op.get("reason", ""),
-                "alternatives": op.get("alternatives", []),
-                "consequences": op.get("consequences", []),
-                "refs": op.get("refs", []),
-                "related_files": op.get("related_files", []),
-                "derived_from": None,
-                "history": [],
-            })
+            arr.append(_new_decision(counter, today, commit_date, op))
             counter += 1
 
         elif op_type == "update":
-            idx = find_idx(arr, id_=op_id, scope=op_scope, pat=op_pat)
+            idx = find_idx(arr, id_=op_id, scope=op_scope)
             if idx >= 0:
                 d = arr[idx]
+                new_related = op.get("related_files") or []
+                new_reason = op.get("reason", "")
+
+                # divergence score 누적
+                delta = accumulate_divergence(d, new_related, new_reason)
+                d["divergence_score"] = round(d.get("divergence_score", 0.0) + delta, 3)
+
+                # history에 현재 상태 저장 (related_files 포함)
                 d["history"] = d.get("history", []) + [{
                     "documentDate": d.get("documentDate", d.get("date")),
                     "commitDate": d.get("commitDate", ""),
                     "title": d.get("title"),
                     "reason": d.get("reason"),
+                    "related_files": d.get("related_files", []),
                     "action": "updated",
                 }]
                 d["documentDate"] = today
                 d["commitDate"] = commit_date
-                if op.get("reason"):
-                    d["reason"] = op["reason"]
+                if new_reason:
+                    d["reason"] = new_reason
                 if op.get("refs") is not None:
                     d["refs"] = op["refs"]
-                if op.get("related_files") is not None:
-                    d["related_files"] = op["related_files"]
+                if new_related:
+                    d["related_files"] = new_related
                 if op.get("title"):
                     d["title"] = op["title"]
                 if op.get("scope"):
                     d["scope"] = op["scope"]
 
         elif op_type == "prune":
-            idx = find_idx(arr, id_=op_id, scope=op_scope, pat=op_pat)
+            idx = find_idx(arr, id_=op_id, scope=op_scope)
             if idx >= 0:
                 d = arr[idx]
                 d["history"] = d.get("history", []) + [{
@@ -665,40 +691,17 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                 d["commitDate"] = commit_date
 
         elif op_type == "derive":
-            arr.append({
-                "id": fmt_id(counter),
-                "status": "active",
-                "documentDate": today,
-                "commitDate": commit_date,
-                "scope": op_scope,
-                "title": op.get("title", ""),
-                "reason": op.get("reason", ""),
-                "alternatives": op.get("alternatives", []),
-                "consequences": op.get("consequences", []),
-                "refs": op.get("refs", []),
-                "related_files": op.get("related_files", []),
+            arr.append(_new_decision(counter, today, commit_date, op, {
                 "derived_from": op.get("source_ids", []),
-                "history": [],
-            })
+            }))
             counter += 1
 
         elif op_type == "merge":
             sources = op.get("source_ids", [])
-            arr.append({
-                "id": fmt_id(counter),
-                "status": "active",
-                "documentDate": today,
-                "commitDate": commit_date,
-                "scope": op_scope,
-                "title": op.get("title", ""),
-                "reason": op.get("reason", ""),
-                "alternatives": op.get("alternatives", []),
-                "consequences": op.get("consequences", []),
-                "refs": op.get("refs", []),
-                "related_files": op.get("related_files", []),
+            arr.append(_new_decision(counter, today, commit_date, op, {
                 "merged_from": sources,
-                "history": [],
-            })
+            }))
+            new_id = fmt_id(counter)
             counter += 1
             for d in arr:
                 if d.get("id") in sources:
@@ -708,7 +711,7 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                         "title": d.get("title"),
                         "reason": d.get("reason"),
                         "action": "merged",
-                        "merged_into": fmt_id(counter - 1),
+                        "merged_into": new_id,
                     }]
                     d["status"] = "superseded"
 
@@ -725,30 +728,94 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                         "action": "split",
                     }]
                     d["status"] = "superseded"
+                    d["divergence_score"] = 0.0
                     break
             for part in parts:
-                arr.append({
-                    "id": fmt_id(counter),
-                    "status": "active",
-                    "documentDate": today,
-                    "commitDate": commit_date,
-                    "scope": part.get("scope", ""),
-                    "title": part.get("title", ""),
-                    "reason": part.get("reason", ""),
-                    "alternatives": part.get("alternatives", []),
-                    "consequences": part.get("consequences", []),
-                    "refs": part.get("refs", []),
-                    "related_files": part.get("related_files", []),
+                arr.append(_new_decision(counter, today, commit_date, part, {
                     "split_from": src_id,
-                    "history": [],
-                })
+                }))
                 counter += 1
 
     return {"decisions": arr}
 
 
 # ─────────────────────────────────────────────
-# 상태 파일 (resume 지원)
+# Drift scan
+# ─────────────────────────────────────────────
+
+def build_drift_scan_prompt(candidates: list[dict]) -> str:
+    prompt_path = PROMPT_DIR / "drift-scan.md"
+    if not prompt_path.exists():
+        raise FileNotFoundError(f"drift-scan.md 없음: {prompt_path}")
+
+    with open(prompt_path, encoding="utf-8") as f:
+        template = f.read()
+
+    candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
+    return template.replace("{{DRIFT_CANDIDATES}}", candidates_json)
+
+
+def run_drift_scan(
+    decisions_data: dict,
+    llm_caller,
+    threshold: float,
+    today: str,
+) -> dict:
+    """
+    divergence_score >= threshold인 decisions를 LLM에 전달해 split 여부 판단.
+    - split 발생: 기존 decision superseded, 새 decisions 생성, score 리셋
+    - split 불필요: 해당 decisions의 score를 0.3배로 감소 (재검토 유예)
+    """
+    candidates = [
+        d for d in decisions_data.get("decisions", [])
+        if d.get("status") == "active" and d.get("divergence_score", 0.0) >= threshold
+    ]
+
+    if not candidates:
+        return decisions_data
+
+    # history 전체 포함해서 LLM에 전달
+    print(f"\n  [drift scan] 후보 {len(candidates)}개 (score >= {threshold})")
+    for c in candidates:
+        print(f"    {c['id']} | score={c.get('divergence_score', 0):.2f} | {c['title'][:50]}")
+
+    try:
+        prompt = build_drift_scan_prompt(candidates)
+    except FileNotFoundError as e:
+        print(f"  [drift scan] {e}", file=sys.stderr)
+        return decisions_data
+
+    try:
+        response = llm_caller(prompt)
+    except Exception as e:
+        print(f"  [drift scan] LLM 호출 실패: {e}", file=sys.stderr)
+        return decisions_data
+
+    parsed = extract_json(response)
+    if not parsed or "operations" not in parsed:
+        print("  [drift scan] 응답에서 operations JSON을 찾을 수 없음")
+        return decisions_data
+
+    # split만 허용, 나머지 무시
+    split_ops = [op for op in parsed["operations"] if op.get("op") == "split"]
+    split_src_ids = {op.get("source_id") for op in split_ops}
+
+    if split_ops:
+        print(f"  [drift scan] split {len(split_ops)}개 적용")
+        decisions_data = apply_operations(decisions_data, split_ops, today)
+    else:
+        print(f"  [drift scan] split 없음 — 후보들의 score 감소")
+
+    # split 안 된 후보들은 score 감소 (0.3배)
+    for d in decisions_data.get("decisions", []):
+        if d.get("id") in {c["id"] for c in candidates} and d.get("id") not in split_src_ids:
+            d["divergence_score"] = round(d.get("divergence_score", 0.0) * 0.3, 3)
+
+    return decisions_data
+
+
+# ─────────────────────────────────────────────
+# 상태 파일
 # ─────────────────────────────────────────────
 
 def load_state(output_dir: Path) -> dict:
@@ -895,18 +962,18 @@ def process_commit(
     max_diff: int,
     dry_run: bool,
     verbose: bool,
+    drift_threshold: float,
+    no_drift_scan: bool,
 ) -> dict:
     print(f"\n{'─'*60}")
     print(f"  커밋: {commit['hash'][:12]} | {commit['subject'][:60]}")
     print(f"  날짜: {commit['date']} | 작성자: {commit['author']}")
 
-    # diff 추출 (전역 제외 적용)
     diff = get_diff(repo, commit["hash"])
     if not diff.strip():
         print("  → diff 없음, 건너뜀")
         return decisions_data
 
-    # 타겟 필터 적용
     diff, used_fallback = apply_target_filter(diff, filters, verbose=verbose)
     if not diff.strip():
         print("  → 타겟 관련 파일 없음, 건너뜀")
@@ -957,10 +1024,13 @@ def process_commit(
     print(f"  operations ({len(operations)}): {op_summary}")
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    # commit["date"] 형식: "2026-03-15 14:30:00 +0900" → 날짜만 추출
     commit_date = commit["date"].split(" ")[0] if commit.get("date") else ""
     decisions_data = apply_operations(decisions_data, operations, today, commit_date)
     print(f"  ✓ decisions 총 {len(decisions_data.get('decisions', []))}개")
+
+    # drift scan: threshold 초과 decision이 있으면 즉시 실행
+    if not no_drift_scan:
+        decisions_data = run_drift_scan(decisions_data, llm_caller, drift_threshold, today)
 
     return decisions_data
 
@@ -1001,7 +1071,6 @@ def main() -> None:
     )
     parser.add_argument("--output", required=True, help="decisions.json 저장 디렉터리")
 
-    # LLM 설정
     llm_group = parser.add_mutually_exclusive_group(required=True)
     llm_group.add_argument("--api-base", help="OpenAI-compatible API base URL")
     llm_group.add_argument("--llm-cmd", help="커스텀 LLM CLI 커맨드 (stdin으로 프롬프트 주입)")
@@ -1009,22 +1078,22 @@ def main() -> None:
     parser.add_argument("--api-key", help="API 키 (또는 OPENAI_API_KEY 환경변수)")
     parser.add_argument("--model", default="gpt-4o", help="모델명 (기본: gpt-4o)")
 
-    # 필터 옵션
-    parser.add_argument(
-        "--skip-repo-scan",
-        action="store_true",
-        help="레포 구조 LLM 스캔 생략 (기본 필터 또는 기존 .adr-filters.yaml 사용)",
-    )
-    parser.add_argument(
-        "--filters-file",
-        help="사용할 필터 파일 경로 (기본: <repo>/.adr-filters.yaml)",
-    )
+    parser.add_argument("--skip-repo-scan", action="store_true",
+                        help="레포 구조 LLM 스캔 생략 (기본 필터 또는 기존 .adr-filters.yaml 사용)")
+    parser.add_argument("--filters-file",
+                        help="사용할 필터 파일 경로 (기본: <repo>/.adr-filters.yaml)")
 
-    # 동작 옵션
+    parser.add_argument("--drift-threshold", type=float, default=DEFAULT_DRIFT_THRESHOLD,
+                        help=f"divergence score 임계값 (기본: {DEFAULT_DRIFT_THRESHOLD})")
+    parser.add_argument("--no-drift-scan", action="store_true",
+                        help="drift scan 비활성화")
+
     parser.add_argument("--resume", action="store_true", help="마지막 처리 커밋부터 재개")
     parser.add_argument("--limit", type=int, help="처리할 최대 커밋 수 (테스트용)")
-    parser.add_argument("--max-diff", type=int, default=DEFAULT_MAX_DIFF, help=f"diff 최대 문자 수 (기본: {DEFAULT_MAX_DIFF})")
-    parser.add_argument("--context-lines", type=int, default=DEFAULT_CONTEXT_LINES, help=f"git diff context lines (기본: {DEFAULT_CONTEXT_LINES})")
+    parser.add_argument("--max-diff", type=int, default=DEFAULT_MAX_DIFF,
+                        help=f"diff 최대 문자 수 (기본: {DEFAULT_MAX_DIFF})")
+    parser.add_argument("--context-lines", type=int, default=DEFAULT_CONTEXT_LINES,
+                        help=f"git diff context lines (기본: {DEFAULT_CONTEXT_LINES})")
     parser.add_argument("--dry-run", action="store_true", help="LLM 호출 없이 diff만 추출 (테스트)")
     parser.add_argument("--verbose", "-v", action="store_true", help="상세 출력")
     parser.add_argument("--from-commit", help="이 커밋 해시 이후부터 처리")
@@ -1035,7 +1104,6 @@ def main() -> None:
     output_dir = Path(args.output).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # LLM caller 설정
     if args.api_base:
         api_key = args.api_key or os.environ.get("OPENAI_API_KEY", "")
         if not api_key:
@@ -1047,7 +1115,6 @@ def main() -> None:
         llm_caller = lambda prompt: call_llm_cmd(prompt, args.llm_cmd)
         print(f"LLM: {args.llm_cmd}")
 
-    # 레포 확인
     repo = str(Path(args.repo).expanduser().resolve())
     try:
         head = git(repo, "rev-parse", "HEAD")
@@ -1056,12 +1123,11 @@ def main() -> None:
         print(f"오류: git 레포지터리를 찾을 수 없습니다: {repo}", file=sys.stderr)
         sys.exit(1)
 
-    # ── 필터 준비 ──────────────────────────────
+    # 필터 준비
     repo_filters_path = Path(repo) / FILTERS_FILENAME
     filters_exist = repo_filters_path.exists() or bool(args.filters_file)
 
     if not args.skip_repo_scan and not filters_exist and not args.dry_run:
-        # 레포 구조 스캔 + LLM 필터 생성
         print(f"\n[필터 준비] .adr-filters.yaml 없음 → LLM 스캔 시작")
         generated = generate_filters_with_llm(repo, llm_caller)
         if generated:
@@ -1074,13 +1140,13 @@ def main() -> None:
 
     filters = load_filters(repo, args.target, args.filters_file)
     if filters:
-        include_count = len(filters.get("include", []))
-        exclude_count = len(filters.get("exclude", []))
-        print(f"[필터] target={args.target} | include={include_count}개 | exclude={exclude_count}개")
+        print(f"[필터] target={args.target} | include={len(filters.get('include', []))}개 | exclude={len(filters.get('exclude', []))}개")
     else:
         print(f"[필터] target={args.target} | 필터 없음 (전체 허용)")
 
-    # ── 커밋 처리 준비 ─────────────────────────
+    drift_info = f"threshold={args.drift_threshold}" if not args.no_drift_scan else "비활성"
+    print(f"[drift scan] {drift_info}")
+
     state = load_state(output_dir)
     decisions_data = load_decisions(output_dir)
 
@@ -1105,7 +1171,6 @@ def main() -> None:
         commits = commits[:args.limit]
         print(f"(--limit {args.limit} 적용: {len(commits)}개만 처리)")
 
-    # ── 커밋 순회 ──────────────────────────────
     processed = 0
     for i, commit in enumerate(commits, 1):
         print(f"\n[{i}/{len(commits)}]", end="")
@@ -1121,6 +1186,8 @@ def main() -> None:
             max_diff=args.max_diff,
             dry_run=args.dry_run,
             verbose=args.verbose,
+            drift_threshold=args.drift_threshold,
+            no_drift_scan=args.no_drift_scan,
         )
 
         state["last_processed_hash"] = commit["hash"]
