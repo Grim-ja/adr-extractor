@@ -973,8 +973,6 @@ def get_canonical_summary(decisions_data: dict) -> list:
             "scope": d.get("scope"),
             "summary": summary,
         }
-        if d.get("history"):
-            entry["history_count"] = len(d["history"])
         result.append(entry)
     return result
 
