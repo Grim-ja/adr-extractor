@@ -652,6 +652,7 @@ def load_decisions(output_dir: Path) -> dict:
             d.setdefault("last_active_commit", "")
             d.setdefault("last_active_date", d.get("documentDate", ""))
             d.setdefault("last_reviewed_commit", None)
+            d.setdefault("last_reviewed_processed_count", -1)
             d.setdefault("related_churn_count", 0)
         return data
     return {"decisions": [], "convergence_scores": {}}
@@ -701,6 +702,7 @@ def _new_decision(counter: int, today: str, commit_date: str, op: dict, extra: O
         "last_active_commit": "",
         "last_active_date": today,
         "last_reviewed_commit": None,
+        "last_reviewed_processed_count": -1,
         "related_churn_count": 0,  # last_active_commit 이후 related_files 변경 커밋 수
     }
     if extra:
@@ -1195,17 +1197,15 @@ def run_staleness_scan(
     """
     arr = decisions_data.get("decisions", [])
 
-    # cooldown 체크를 위한 commit 순서 추정 (processed_count 활용)
     candidates = []
     for d in arr:
         if d.get("status") != "active":
             continue
         if d.get("staleness_score", 0.0) < threshold:
             continue
-        # cooldown: last_reviewed_commit이 있으면 processed_count 기반 추정
-        last_reviewed = d.get("last_reviewed_commit")
-        if last_reviewed and d.get("staleness_score", 0.0) < threshold * 1.5:
-            # 강하게 stale하지 않으면 cooldown 적용 (간단한 근사)
+        # cooldown 체크: last_reviewed_processed_count 이후 K commits 미만이면 skip
+        last_reviewed_count = d.get("last_reviewed_processed_count", -1)
+        if last_reviewed_count >= 0 and (processed_count - last_reviewed_count) < cooldown:
             continue
         candidates.append(d)
 
@@ -1253,15 +1253,12 @@ def run_staleness_scan(
 
     # keep/update/prune만 허용
     allowed_ops = [op for op in parsed["operations"] if op.get("op") in ("update", "prune")]
-    keep_ids = {
-        op.get("id") for op in parsed["operations"] if op.get("op") == "keep"
-    }
 
     if allowed_ops:
         print(f"  [staleness scan] {len(allowed_ops)}개 operation 적용")
         decisions_data = apply_operations(decisions_data, allowed_ops, today)
 
-    # 처리된 decisions score 리셋/감소 + last_reviewed_commit 갱신
+    # 처리된 decisions score 리셋/감소 + cooldown 갱신
     operated_ids = {op.get("id") for op in allowed_ops}
     for d in decisions_data.get("decisions", []):
         d_id = d.get("id")
@@ -1270,9 +1267,10 @@ def run_staleness_scan(
         if d_id in operated_ids:
             d["staleness_score"] = 0.0
         else:
-            # keep 또는 무응답 — score 감소 + cooldown 시작
+            # keep — score 감소 + cooldown 시작
             d["staleness_score"] = round(d.get("staleness_score", 0.0) * 0.3, 3)
             d["last_reviewed_commit"] = current_commit_hash
+            d["last_reviewed_processed_count"] = processed_count
 
     return decisions_data
 
@@ -1436,6 +1434,16 @@ def get_canonical_summary(decisions_data: dict) -> list:
             "scope": d.get("scope"),
             "summary": summary,
         }
+
+        # extensions 요약 — LLM이 중복 extend를 피할 수 있도록
+        extensions = d.get("extensions", [])
+        if extensions:
+            entry["extensions_count"] = len(extensions)
+            # 가장 최근 extension의 evidence 첫 문장만 포함
+            last_evidence = extensions[-1].get("evidence", "")
+            m2 = re.search(r'\.\s+[A-Z`]', last_evidence)
+            entry["latest_extension"] = last_evidence[:m2.start() + 1].strip() if m2 else last_evidence[:120].strip()
+
         result.append(entry)
     return result
 

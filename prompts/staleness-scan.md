@@ -40,6 +40,7 @@ replaced, removed, or fully absorbed into other decisions.
 This scan is for maintenance, not discovery.
 Do not create new ADRs.
 Do not add new observations.
+Do not use extend.
 Choose keep, update, or prune only.
 
 ## Output Format
