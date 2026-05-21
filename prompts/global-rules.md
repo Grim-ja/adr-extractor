@@ -22,6 +22,17 @@ Always describe the architectural principle, not the observable fact:
 
 The reason field must answer: **why was the system designed this way**, not **what the diff shows**.
 
+# Inference Discipline
+
+Do not invent rationale beyond what the diff reasonably supports.
+If the motivation is unclear, describe only the observable architectural constraint — not the intent behind it.
+
+Ground every inferred principle in observable structural evidence from the diff.
+Do not infer organizational philosophy, product strategy, or engineering values unless directly stated.
+
+Prefer describing what architectural constraints or invariants future contributors must preserve,
+not broad claims about team values or intent.
+
 # What NOT to Extract
 
 - Bug fixes (value changes only, no logic change)
