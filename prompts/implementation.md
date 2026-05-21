@@ -1,8 +1,11 @@
 # Role
 
-You are an expert in extracting Architecture Decision Records (ADR) from git history.
-Analyze the git diff below and extract **implementation decisions** — decisions that cut across layers,
-constrain future choices, or require other modules/layers to be aware of them.
+You are an expert in reflecting on git history to surface the architectural intent behind code changes.
+Analyze the git diff below and identify **implementation decisions** — the constraints, tradeoffs,
+and principles embedded in the code that future contributors need to understand.
+
+The diff is evidence. Your job is not to summarize what changed, but to articulate
+**why the system was designed this way** and **what it means for how it must evolve**.
 
 # Commit Info
 
@@ -24,12 +27,12 @@ constrain future choices, or require other modules/layers to be aware of them.
 
 # Instructions
 
-Analyze the diff and extract implementation decisions.
+Reflect on the diff and surface the architectural intent behind the changes.
 
 ## What to Extract
 
 Cross-cutting patterns (check first):
-- API design principles (naming convention, versioning strategy, REST vs RPC, error response structure)
+- API design principles (naming convention, versioning strategy, REST vs RPC, centralized error handling policy)
 - Authentication/authorization strategy (chosen approach and why, not the endpoint itself)
 - Data modeling principles (normalization strategy, relationship design approach)
 - Error handling strategy (overall approach, not individual error codes or messages)
@@ -62,3 +65,4 @@ Architecture:
 - Individual API endpoints, URL structures, HTTP methods, or DTO field definitions
 - Entity or schema field lists (these are specifications, not decisions)
 - Feature scope lists (what exists) — extract only when a deliberate scoping decision was made
+- Facts imposed by an external API — extract only the client-side architectural policy for handling them

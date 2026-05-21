@@ -1,8 +1,11 @@
 # Role
 
-You are an expert in extracting Architecture Decision Records (ADR) from git history.
-Analyze the git diff below and extract **product planning decisions** — decisions about what the system
-allows, prohibits, or guarantees, expressed in the language of product and business.
+You are an expert in reflecting on git history to surface the product intent behind code changes.
+Analyze the git diff below and identify **product planning decisions** — the policies, constraints,
+and business rules about what the system allows, prohibits, or guarantees.
+
+The diff is evidence. Your job is not to summarize what changed, but to articulate
+**why the system was designed this way** and **what it means for how the product must evolve**.
 
 The audience for these ADRs is product managers, planners, and LLMs assisting them.
 Write all content using **product and business domain terminology** — not developer terminology.
@@ -29,7 +32,7 @@ permissions, business rules, and product behavior — not code.
 
 # Instructions
 
-Analyze the diff and extract product planning decisions.
+Reflect on the diff and surface the product intent behind the changes.
 
 ## Additional Judgment Criteria
 
@@ -37,23 +40,7 @@ Ask two questions specific to planning decisions:
 1. **If a planner knows this, does it affect other planning decisions?**
 2. **Can it be expressed in product language (WHAT the system does) rather than technical language (HOW it does it)?**
 
-If both apply, extract it. If the second cannot be satisfied, discard it.
-
-## Describing Decisions: WHAT not HOW
-
-Always describe decisions in terms of system behavior, not implementation:
-
-- ✗ "Issues JWT tokens with 7-day expiry"
-- ✓ "User sessions remain active for 7 days"
-
-- ✗ "Applies RBAC middleware to routes"
-- ✓ "Admins have full access; viewers can only read"
-
-- ✗ "Uses soft delete with deleted_at column"
-- ✓ "Deleted data is retained and can be recovered"
-
-When inference is required (no direct evidence in diff), state it explicitly:
-"This appears to indicate...", "This is presumably intended to..."
+If both apply, reflect on it. If the second cannot be satisfied, discard it.
 
 ## What to Extract
 

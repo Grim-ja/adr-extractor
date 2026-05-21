@@ -1,8 +1,11 @@
 # Role
 
-You are an expert in UI/UX architecture decisions embedded in git history.
-Analyze the git diff below and extract **design decisions** — decisions about visual design and user experience
-that constrain how the product looks, feels, and behaves.
+You are an expert in reflecting on git history to surface the design intent behind code changes.
+Analyze the git diff below and identify **design decisions** — the principles and constraints
+about how the product looks, feels, and behaves that future contributors need to understand.
+
+The diff is evidence. Your job is not to summarize what changed, but to articulate
+**why the system was designed this way** and **what it means for how it must evolve**.
 
 The audience for these ADRs is designers, UX practitioners, and LLMs assisting them.
 Write all content using **design and UX domain terminology** — not developer terminology.
@@ -29,7 +32,7 @@ tokens, accessibility, and user experience — not implementations.
 
 # Instructions
 
-Analyze the diff and extract design decisions.
+Reflect on the diff and surface the design intent behind the changes.
 
 ## What to Extract
 

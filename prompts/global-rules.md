@@ -1,8 +1,26 @@
 # Core Judgment Criteria
 
-Before extracting, ask:
-**"Would this still be worth documenting if the commit hash and implementation diff were unavailable?"**
-If the value comes from the implementation detail rather than the design intent — do not extract.
+Before reflecting, ask:
+**"What constraint, tradeoff, or principle does this code reveal?"**
+If the answer is only "something was added or changed" — that is a summary, not a decision. Do not extract.
+
+The diff is evidence of a decision, not the decision itself.
+Surface the architectural intent: what the code commits future contributors to, and why.
+
+# Describing Decisions: Principle not Fact
+
+Always describe the architectural principle, not the observable fact:
+
+- ✗ "A `responses.rs` module was added containing DTO definitions"
+- ✓ "Response types are co-located with their domain module to enforce ownership boundaries"
+
+- ✗ "The project API returns a region-keyed map"
+- ✓ "Inferred: The client normalizes region-keyed API envelopes at the infra layer so domain logic receives flat lists"
+
+- ✗ "JWT tokens with 7-day expiry are issued"
+- ✓ "User sessions remain active for 7 days — a deliberate tradeoff between convenience and security"
+
+The reason field must answer: **why was the system designed this way**, not **what the diff shows**.
 
 # What NOT to Extract
 
@@ -17,6 +35,7 @@ If the value comes from the implementation detail rather than the design intent 
 - Individual API endpoints, URL structures, HTTP methods, or DTO field definitions
 - Entity or schema field lists (these are specifications, not decisions)
 - Feature scope lists (what exists) — extract only when a deliberate scoping decision was made
+- Facts imposed by an external API — extract only the client-side architectural policy for handling them
 
 # Relationship to Existing Decisions
 
@@ -48,6 +67,8 @@ Return the following JSON in a **```json ... ``` code block**. One brief line of
 
 **The `title` field is mandatory for every operation.**
 
+The `reason` field must describe the architectural principle this code embodies —
+what it reveals about how the system is designed to work, and why that choice was made.
 If the decision is inferred from code changes rather than explicitly stated in docs, commit messages,
 or comments, prefix the `reason` field with `"Inferred:"`.
 
@@ -58,7 +79,7 @@ or comments, prefix the `reason` field with `"Inferred:"`.
       "op": "add",
       "scope": "{{SCOPE_EXAMPLE}}",
       "title": "One-line summary (max 40 chars, required)",
-      "reason": "Why this decision was made — include specific evidence from the diff. 2-4 sentences.",
+      "reason": "The architectural principle this code embodies — why the system was designed this way and what it commits future contributors to. 2-4 sentences.",
       "alternatives": ["Alternative that was considered"],
       "consequences": ["Trade-offs of this decision"],
       "refs": [],
@@ -67,7 +88,7 @@ or comments, prefix the `reason` field with `"Inferred:"`.
     {
       "op": "update",
       "id": "d-001",
-      "reason": "What enriches or corrects the existing reason — include new evidence",
+      "reason": "The principle this enriches or corrects — what new insight the diff reveals about the existing decision",
       "related_files": ["relevant files"]
     }
   ]
