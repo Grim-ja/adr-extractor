@@ -5,7 +5,8 @@ Before reflecting, ask:
 If the answer is only "something was added or changed" — that is a summary, not a decision. Do not extract.
 
 The diff is evidence of a decision, not the decision itself.
-Surface the architectural intent: what the code commits future contributors to, and why.
+Surface the best current explanation: what structural design direction does this code suggest,
+and what is the simplest principle that accounts for the observed structure?
 
 # Describing Decisions: Principle not Fact
 
@@ -24,14 +25,12 @@ The reason field must answer: **why was the system designed this way**, not **wh
 
 # Inference Discipline
 
-Do not invent rationale beyond what the diff reasonably supports.
-If the motivation is unclear, describe only the observable architectural constraint — not the intent behind it.
+Prefer the simplest explanation that fits the observed evidence.
+If a simpler principle accounts for the same structural facts, use that instead of a more elaborate one.
 
-Ground every inferred principle in observable structural evidence from the diff.
-Do not infer organizational philosophy, product strategy, or engineering values unless directly stated.
-
-Prefer describing what architectural constraints or invariants future contributors must preserve,
-not broad claims about team values or intent.
+ADRs capture the strongest currently-supported explanation of the system's architectural structure.
+New evidence may refine or overturn that explanation.
+Do not defend an existing ADR against contradicting evidence; revise it.
 
 # What NOT to Extract
 
@@ -61,7 +60,7 @@ Update an existing ADR only when the change alters the architectural decision it
 its tradeoffs, ownership model, lifecycle, boundary, or data flow.
 Do not update an ADR merely because an implementation detail changed within the same decision.
 Do not append to history merely because another module, domain, or file repeated an
-already-established pattern. Repetition is evidence the decision holds — not a reason to update.
+already-established pattern. Repetition is evidence the current explanation remains sufficient — not a reason to elaborate further.
 Append history only when the repetition changes the scope, boundary, tradeoff, or contract
 of the decision.
 
@@ -90,7 +89,7 @@ or comments, prefix the `reason` field with `"Inferred:"`.
       "op": "add",
       "scope": "{{SCOPE_EXAMPLE}}",
       "title": "One-line summary (max 40 chars, required)",
-      "reason": "The architectural principle this code embodies — why the system was designed this way and what it commits future contributors to. 2-4 sentences.",
+      "reason": "The strongest currently-supported explanation of why the system appears to be structured this way, based on the evidence observed so far. 2-4 sentences.",
       "alternatives": ["Alternative that was considered"],
       "consequences": ["Trade-offs of this decision"],
       "refs": [],
