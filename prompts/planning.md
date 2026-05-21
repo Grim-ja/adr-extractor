@@ -57,15 +57,15 @@ When inference is required (no direct evidence in diff), state it explicitly:
 
 ## What to Extract
 
-- Domain entity definitions (what entities exist, what relationships they have)
-- User permissions and roles (who can do what)
-- Business rules (what conditions allow or prevent actions)
-- User workflows (what sequence of events occurs)
+- Domain modeling decisions (why entities were structured this way, not the field list itself)
+- User permissions and roles (the permission model and why it was designed this way)
+- Business rules (what conditions allow or prevent actions, and why)
+- User workflows (key flow decisions, not step-by-step descriptions)
 - Product limits and policies (plan-based features, quotas, expiry policies)
 - Notification and event triggers (what prompts a message to the user)
-- Data lifecycle (creation, retention, deletion, recovery policies)
-- External service integration scope (what third-party connects and at what level)
-- Locale / internationalization scope
+- Data lifecycle decisions (retention, deletion, recovery policy choices)
+- External service integration scope (why this third-party was chosen and at what level)
+- Locale / internationalization scope decisions
 
 ## What NOT to Extract (additional)
 
@@ -73,6 +73,7 @@ When inference is required (no direct evidence in diff), state it explicitly:
 - Technical decisions with no impact on planning decisions
 - Configuration or parameter changes with no product behavior change
 - Internal workflow or process changes with no user-facing effect
+- Lists of what features or entities exist (specifications, not decisions)
 
 ## Output Rules
 

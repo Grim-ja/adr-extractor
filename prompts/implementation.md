@@ -29,16 +29,16 @@ Analyze the diff and extract implementation decisions.
 ## What to Extract
 
 Cross-cutting patterns (check first):
-- API contracts (endpoint structure, response format, error spec)
-- Authentication/authorization method (token delivery, permission model)
-- Data model / domain entity definitions
-- Error handling conventions (status codes, error object shape)
-- Type/schema contracts (shared types, zod schemas, etc.)
+- API design principles (naming convention, versioning strategy, REST vs RPC, error response structure)
+- Authentication/authorization strategy (chosen approach and why, not the endpoint itself)
+- Data modeling principles (normalization strategy, relationship design approach)
+- Error handling strategy (overall approach, not individual error codes or messages)
+- Shared type/schema design principles (why a shared contract exists, not the fields themselves)
 
 Backend:
-- DB schema / ORM model design
+- DB schema design principles (not individual table definitions)
 - Service/repository layer separation principles
-- External service integration patterns
+- External service integration patterns (why this integration approach was chosen)
 - Caching, queue, event handling approach
 - Environment variable / config management
 
@@ -59,3 +59,6 @@ Architecture:
 ## What NOT to Extract (additional)
 
 - Implementation details internal to a single layer (no cross-module impact)
+- Individual API endpoints, URL structures, HTTP methods, or DTO field definitions
+- Entity or schema field lists (these are specifications, not decisions)
+- Feature scope lists (what exists) — extract only when a deliberate scoping decision was made

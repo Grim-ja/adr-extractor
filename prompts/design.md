@@ -34,8 +34,8 @@ Analyze the diff and extract design decisions.
 ## What to Extract
 
 Visual design (UI):
-- Design token system (color, typography, spacing, shadow, radius)
-- Component variant and size system
+- Design token system adoption and structure (the decision to use tokens, not individual token values)
+- Component variant and size system principles
 - Design system structure (atoms/molecules/organisms, shadcn/ui, etc.)
 - Dark mode / theme switching approach
 - Icon system selection
@@ -54,6 +54,7 @@ User experience (UX):
 ## What NOT to Extract (additional)
 
 - Simple color value / text changes
+- Individual token values or style constants (these are specifications, not decisions)
 - Parameter or style value tuning with no design intent change
 - Minor component restructuring with no visual or interaction change
 

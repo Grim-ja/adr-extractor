@@ -14,6 +14,9 @@ If the value comes from the implementation detail rather than the design intent 
 - Minor refactors with no behavioral change (renaming, reordering, extracting helpers)
 - Small error handling or fallback syntax changes
 - Implementation detail changes within an already-documented decision
+- Individual API endpoints, URL structures, HTTP methods, or DTO field definitions
+- Entity or schema field lists (these are specifications, not decisions)
+- Feature scope lists (what exists) — extract only when a deliberate scoping decision was made
 
 # Relationship to Existing Decisions
 
