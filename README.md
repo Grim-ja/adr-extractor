@@ -1,175 +1,199 @@
 # git-adr
 
-git 히스토리를 initial commit부터 순회하며 Architecture Decision Records(ADR)를
-누적 생성하는 도구.
+Walks a git repository from the initial commit and accumulates Architecture Decision Records (ADR)
+by reflecting on each commit's diff with an LLM.
 
-## 개요
+## How it works
 
-커밋 하나씩 `git diff`를 추출하고 LLM에 분석을 맡겨, 설계 결정을 `decisions.json`에 쌓아간다.
-기존 ADR 시스템(`decisions.sh`, `update-decisions.sh`)과 동일한 데이터 포맷을 사용하므로
-생성된 `decisions.json`을 기존 도구로 바로 쿼리할 수 있다.
+For each commit, the tool extracts the diff, filters noise (lock files, binaries, generated files),
+and asks an LLM to reflect on the architectural intent behind the changes — not to summarize what
+changed, but to surface the constraints, tradeoffs, and principles the code commits future
+contributors to. Results are accumulated in `decisions.json`.
 
-## 파일 구조
+On subsequent runs, `--resume` picks up from the last processed commit, so incremental updates
+as new commits land are supported out of the box.
+
+## File structure
 
 ```
 adr/
-  git-adr.py              - 메인 스크립트
-  decisions.sh            - decisions.json 쿼리 도구 (기존)
-  update-decisions.sh     - plan_output.json 반영 도구 (기존)
+  git-adr.py              - main script
+  anthropic-llm.py        - Anthropic API wrapper (stdin → stdout)
+  decisions.sh            - query tool for decisions.json
   prompts/
-    impl-backend.md       - 백엔드 구현 결정 분석 프롬프트
-    impl-frontend.md      - 프론트엔드 구현 결정 분석 프롬프트
-    ui.md                 - UI/UX 결정 분석 프롬프트
-    planning.md           - 기획/제품 결정 분석 프롬프트
-    architecture.md       - 전체 아키텍처 결정 분석 프롬프트
+    global-rules.md       - shared extraction rules (composed into every target prompt)
+    implementation.md     - implementation target: architecture, layers, tech stack
+    design.md             - design target: UI/UX, design system, interaction patterns
+    planning.md           - planning target: business rules, domain model, policies
+    drift-scan.md         - boundary drift detection prompt
 ```
 
-## 사용법
+## Usage
 
-### 기본 실행 (OpenAI-compatible API)
+### Anthropic API
 
 ```bash
-python git-adr.py \
-  --repo /path/to/your/repo \
-  --target impl-backend \
-  --output ./my-project-adr/ \
+export ANTHROPIC_API_KEY=your_key_here
+python3 git-adr.py \
+  --repo /path/to/repo \
+  --target implementation \
+  --output ./adr-output/ \
+  --llm-cmd "python3 /path/to/anthropic-llm.py" \
+  --skip-repo-scan \
+  --save-every 5
+```
+
+### OpenAI-compatible API
+
+```bash
+python3 git-adr.py \
+  --repo /path/to/repo \
+  --target implementation \
+  --output ./adr-output/ \
   --api-base https://api.openai.com/v1 \
   --api-key $OPENAI_API_KEY \
   --model gpt-4o
 ```
 
-### 커스텀 LLM CLI 사용
+### Custom LLM CLI
 
-프롬프트를 stdin으로 받아 결과를 stdout으로 출력하는 어떤 CLI든 사용 가능.
+Any CLI that reads a prompt from stdin and writes the response to stdout:
 
 ```bash
-python git-adr.py \
-  --repo /path/to/your/repo \
-  --target architecture \
+python3 git-adr.py \
+  --repo /path/to/repo \
+  --target implementation \
   --output ./adr-output/ \
-  --llm-cmd "hermes run --no-stream"
+  --llm-cmd "my-llm --model claude"
 ```
 
-### 이어서 실행 (--resume)
-
-중단된 경우 마지막 처리된 커밋 이후부터 재개:
+### Resume after interruption
 
 ```bash
-python git-adr.py \
-  --repo /path/to/your/repo \
-  --target impl-backend \
-  --output ./my-project-adr/ \
-  --api-base https://api.openai.com/v1 \
-  --api-key $OPENAI_API_KEY \
+python3 git-adr.py \
+  --repo /path/to/repo \
+  --target implementation \
+  --output ./adr-output/ \
+  --llm-cmd "python3 anthropic-llm.py" \
   --resume
 ```
 
-### 특정 커밋 이후부터
+### Dry-run (no LLM calls)
 
 ```bash
-python git-adr.py \
-  --repo /path/to/your/repo \
-  --target ui \
-  --output ./adr-output/ \
-  --api-base https://api.openai.com/v1 \
-  --api-key $OPENAI_API_KEY \
-  --from-commit abc1234def
-```
-
-### Dry-run (LLM 호출 없이 diff만 확인)
-
-```bash
-python git-adr.py \
-  --repo /path/to/your/repo \
-  --target planning \
+python3 git-adr.py \
+  --repo /path/to/repo \
+  --target implementation \
   --output ./test-adr/ \
   --api-base https://api.openai.com/v1 \
   --api-key dummy \
-  --dry-run \
-  --limit 5 \
-  --verbose
+  --dry-run --limit 10 --verbose
 ```
 
-## 타겟 종류
+## Targets
 
-| 타겟 | 분석 관점 | 적합한 경우 |
-|------|-----------|-------------|
-| `implementation` | 백엔드/프론트엔드/아키텍처를 통합한 구현 결정 | 대부분의 레포 |
-| `design` | UI/UX — 디자인 시스템, 인터랙션, 접근성 등 | 디자인 시스템 / UI 컴포넌트 레포 |
-| `planning` | 도메인 모델, 비즈니스 규칙, 권한 등 | 기획 결정 중심 분석 |
+| Target | Focus | Typical use |
+|--------|-------|-------------|
+| `implementation` | Architecture, layers, tech stack, cross-cutting patterns | Most repositories |
+| `design` | UI/UX decisions, design system, interaction patterns | Design system / component repos |
+| `planning` | Business rules, domain model, permissions, policies | Product-centric analysis |
 
-하나의 레포에 여러 타겟을 별도 output 디렉터리에 동시 실행할 수 있다:
+Multiple targets can be run against the same repo into separate output directories:
 
 ```bash
-python git-adr.py --repo . --target implementation --output ./adr/impl/ ...
-python git-adr.py --repo . --target design --output ./adr/design/ ...
+python3 git-adr.py --repo . --target implementation --output ./adr/impl/ ...
+python3 git-adr.py --repo . --target planning --output ./adr/planning/ ...
 ```
 
-## 옵션 전체 목록
+## File-based filtering
 
-```
-필수:
-  --repo PATH           분석할 git 레포지터리 경로
-  --target TARGET       ADR 타겟 (impl-backend/impl-frontend/ui/planning/architecture)
-  --output DIR          decisions.json 저장 디렉터리
+On first run without `--skip-repo-scan`, the tool scans the repo structure and asks the LLM
+to generate a `.adr-filters.yaml` tailored to the project layout. Subsequent runs reuse this file.
 
-LLM (둘 중 하나 필수):
-  --api-base URL        OpenAI-compatible API base URL
-  --llm-cmd CMD         커스텀 LLM CLI (stdin 프롬프트 → stdout 결과)
-
-API 옵션:
-  --api-key KEY         API 키 (또는 OPENAI_API_KEY 환경변수)
-  --model MODEL         모델명 (기본: gpt-4o)
-
-동작 제어:
-  --resume              마지막 처리 커밋부터 재개
-  --from-commit HASH    이 커밋 이후부터 처리
-  --limit N             처리할 최대 커밋 수 (테스트용)
-  --max-diff N          diff 최대 문자 수 (기본: 12000)
-  --context-lines N     git diff context lines (기본: 5)
-  --save-every N        N개 커밋마다 저장 (기본: 1)
-  --dry-run             LLM 호출 없이 diff만 추출
-  --verbose, -v         상세 출력
-```
-
-## 출력 파일
-
-| 파일 | 설명 |
-|------|------|
-| `decisions.json` | 누적된 ADR 데이터 (decisions.sh로 쿼리 가능) |
-| `.adr-state.json` | 진행 상태 (last_processed_hash, processed_count) |
-
-## decisions.json 쿼리
-
-생성된 `decisions.json`은 기존 `decisions.sh` 도구로 쿼리할 수 있다:
+To skip the scan and use built-in defaults:
 
 ```bash
-# 전체 canonical 목록
-DECISIONS_FILE=./my-project-adr/decisions.json ./decisions.sh --canonical
-
-# 특정 결정 상세
-DECISIONS_FILE=./my-project-adr/decisions.json ./decisions.sh --id d-001 --evidence
-
-# 특정 파일 관련 결정
-DECISIONS_FILE=./my-project-adr/decisions.json ./decisions.sh --file src/api/users.ts
-
-# 범위별 조회
-DECISIONS_FILE=./my-project-adr/decisions.json ./decisions.sh --scope architecture
+python3 git-adr.py ... --skip-repo-scan
 ```
 
-## 동작 원리
+To provide a custom filter file:
 
-1. `git log --reverse`로 initial commit부터 커밋 목록 수집
-2. `--resume` 시 `.adr-state.json`에서 마지막 처리 커밋 이후부터 시작
-3. 각 커밋에 대해:
-   - `git diff`로 변경사항 추출 (lock 파일, node_modules 등 자동 제외)
-   - diff 크기 초과 시 파일별 균등 분배 후 truncate
-   - 기존 decisions 요약 + diff → 타겟 프롬프트로 LLM 호출
-   - LLM 응답에서 `operations` JSON 파싱
-   - `add/update/merge/derive/prune/split` 연산을 `decisions.json`에 적용
-4. 매 커밋(또는 `--save-every N`)마다 저장 (중단해도 데이터 보존)
+```bash
+python3 git-adr.py ... --filters-file ./my-filters.yaml
+```
 
-## decisions.json 포맷
+Filter format:
+
+```yaml
+implementation:
+  include:
+    - "src/**"
+    - "*.toml"
+  exclude:
+    - "**/*.sh"
+    - "CHANGELOG.md"
+
+design:
+  include:
+    - "**/components/**"
+    - "**/*.css"
+  exclude:
+    - "**/*.test.*"
+
+planning:
+  include:
+    - "docs/**"
+    - "prisma/**"
+  exclude:
+    - "**/*.test.*"
+```
+
+Files not matched by any include pattern trigger a fallback to the full diff with a warning,
+so no commit is silently skipped.
+
+## All options
+
+```
+Required:
+  --repo PATH             git repository to analyze
+  --target TARGET         implementation | design | planning
+  --output DIR            directory for decisions.json output
+
+LLM (one required):
+  --api-base URL          OpenAI-compatible API base URL
+  --llm-cmd CMD           custom LLM CLI (stdin prompt → stdout response)
+
+API options:
+  --api-key KEY           API key (or OPENAI_API_KEY env var)
+  --model MODEL           model name (default: gpt-4o)
+
+Filter options:
+  --skip-repo-scan        skip LLM repo scan; use defaults or existing .adr-filters.yaml
+  --filters-file PATH     path to filter file (default: <repo>/.adr-filters.yaml)
+
+Drift detection:
+  --drift-threshold N     divergence score threshold to trigger drift scan (default: 2.0)
+  --no-drift-scan         disable drift scan
+
+Run control:
+  --resume                resume from last processed commit
+  --from-commit HASH      start processing after this commit hash
+  --limit N               max commits to process (for testing)
+  --max-diff N            max diff size in characters (default: 12000)
+  --context-lines N       git diff context lines (default: 5)
+  --save-every N          save every N commits (default: 1)
+  --dry-run               extract diffs without calling LLM
+  --verbose, -v           verbose output
+```
+
+## Output files
+
+| File | Description |
+|------|-------------|
+| `decisions.json` | accumulated ADR data |
+| `.adr-state.json` | run state: last processed commit hash, processed count |
+
+## decisions.json schema
 
 ```json
 {
@@ -177,17 +201,42 @@ DECISIONS_FILE=./my-project-adr/decisions.json ./decisions.sh --scope architectu
     {
       "id": "d-001",
       "status": "active",
-      "date": "2024-01-15",
-      "scope": "src/api/auth",
-      "title": "JWT 기반 stateless 인증 채택",
-      "reason": "세션 서버 없이 수평 확장이 필요했다. ...",
-      "alternatives": ["세션 기반 인증", "OAuth only"],
-      "consequences": ["토큰 무효화 복잡성 증가"],
+      "documentDate": "2026-05-21",
+      "commitDate": "2026-03-11",
+      "scope": "src/infra",
+      "title": "Three-layer CLI architecture (cli/domain/infra)",
+      "reason": "...",
+      "alternatives": ["..."],
+      "consequences": ["..."],
       "refs": [],
-      "related_files": ["src/api/auth/jwt.ts"],
+      "related_files": ["src/infra/mod.rs"],
       "derived_from": null,
+      "divergence_score": 0.0,
       "history": []
     }
   ]
 }
+```
+
+`status` is one of `active` or `superseded`. Superseded decisions are retained for history
+but excluded from the canonical summary passed to the LLM on subsequent runs.
+
+`divergence_score` accumulates when an `update` operation adds content that diverges structurally
+from the existing decision (different file seams, low keyword overlap in reason). When it crosses
+`--drift-threshold`, a separate drift scan LLM call evaluates whether the decision should be split.
+
+## Querying decisions.json
+
+```bash
+# full canonical list
+DECISIONS_FILE=./adr-output/decisions.json ./decisions.sh --canonical
+
+# specific decision with evidence
+DECISIONS_FILE=./adr-output/decisions.json ./decisions.sh --id d-001 --evidence
+
+# decisions related to a file
+DECISIONS_FILE=./adr-output/decisions.json ./decisions.sh --file src/infra/api_client.rs
+
+# decisions by scope
+DECISIONS_FILE=./adr-output/decisions.json ./decisions.sh --scope architecture
 ```
