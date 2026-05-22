@@ -820,6 +820,7 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
         elif op_type == "split":
             src_id = op.get("source_id", "")
             parts = op.get("into", [])
+            src_found = False
             for d in arr:
                 if d.get("id") == src_id:
                     d["history"] = d.get("history", []) + [{
@@ -831,14 +832,18 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                     }]
                     d["status"] = "superseded"
                     d["divergence_score"] = 0.0
+                    src_found = True
                     break
+            if not src_found and src_id:
+                print(f"  [warn] split source_id '{src_id}' not found — parts added without superseding")
             for part in parts:
                 arr.append(_new_decision(counter, today, commit_date, part, {
                     "split_from": src_id,
                 }))
                 counter += 1
 
-    return {"decisions": arr}
+    decisions_data["decisions"] = arr
+    return decisions_data
 
 
 # ─────────────────────────────────────────────
