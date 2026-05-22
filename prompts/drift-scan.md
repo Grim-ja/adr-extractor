@@ -34,8 +34,9 @@ Read through each decision's `history` entries in order and determine:
 
 Return the following JSON in a **```json ... ``` code block**.
 
-Include only decisions that require a split. Decisions that do not need splitting are omitted
-(their divergence score will be reduced automatically by the system).
+Include only decisions that require a split. For decisions that do not need splitting,
+include a `keep` operation with a `new_score` — your assessment of how much divergence
+actually exists (0.0 = no divergence, use a low value if the decision is clearly cohesive).
 
 ```json
 {
@@ -63,14 +64,22 @@ Include only decisions that require a split. Decisions that do not need splittin
           "related_files": ["files relevant to this cluster"]
         }
       ]
+    },
+    {
+      "op": "keep",
+      "id": "d-008",
+      "new_score": 0.4
     }
   ]
 }
 ```
 
-If no decisions require splitting:
+If no decisions require splitting (all should be kept):
 ```json
 {
-  "operations": []
+  "operations": [
+    {"op": "keep", "id": "d-007", "new_score": 0.5},
+    {"op": "keep", "id": "d-008", "new_score": 0.2}
+  ]
 }
 ```

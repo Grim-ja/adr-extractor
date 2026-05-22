@@ -892,20 +892,23 @@ def run_drift_scan(
         print("  [drift scan] 응답에서 operations JSON을 찾을 수 없음")
         return decisions_data
 
-    # split만 허용, 나머지 무시
+    # split만 허용, keep은 new_score로 score 업데이트
     split_ops = [op for op in parsed["operations"] if op.get("op") == "split"]
+    keep_ops = [op for op in parsed["operations"] if op.get("op") == "keep"]
     split_src_ids = {op.get("source_id") for op in split_ops}
 
     if split_ops:
         print(f"  [drift scan] split {len(split_ops)}개 적용")
         decisions_data = apply_operations(decisions_data, split_ops, today)
     else:
-        print(f"  [drift scan] split 없음 — 후보들의 score 감소")
+        print(f"  [drift scan] split 없음")
 
-    # split 안 된 후보들은 score 감소 (0.3배)
+    # split 안 된 후보들: LLM이 준 new_score로 업데이트, 없으면 0으로 리셋
+    keep_score_map = {op.get("id"): op.get("new_score", 0.0) for op in keep_ops}
     for d in decisions_data.get("decisions", []):
         if d.get("id") in {c["id"] for c in candidates} and d.get("id") not in split_src_ids:
-            d["divergence_score"] = round(d.get("divergence_score", 0.0) * 0.3, 3)
+            new_score = keep_score_map.get(d.get("id"), 0.0)
+            d["divergence_score"] = round(float(new_score), 3)
 
     return decisions_data
 
@@ -989,17 +992,19 @@ def run_derive_scan(
         print("  [derive scan] 응답에서 operations JSON을 찾을 수 없음")
         return decisions_data
 
-    # derive만 허용
+    # derive만 허용, keep은 new_score로 pair score 업데이트
     derive_ops = [op for op in parsed["operations"] if op.get("op") == "derive"]
+    keep_ops = [op for op in parsed["operations"] if op.get("op") == "keep"]
     derived_source_sets = [set(op.get("source_ids", [])) for op in derive_ops]
 
     if derive_ops:
         print(f"  [derive scan] derive {len(derive_ops)}개 적용")
         decisions_data = apply_operations(decisions_data, derive_ops, today)
     else:
-        print(f"  [derive scan] derive 없음 — 후보 pair score 감소")
+        print(f"  [derive scan] derive 없음")
 
-    # 처리된 pair score 리셋 or 감소
+    # pair score: derive된 것은 0, keep은 LLM이 준 new_score로, 응답 없으면 0
+    keep_score_map = {op.get("pair"): op.get("new_score", 0.0) for op in keep_ops}
     for key, score, _, _ in valid_pairs:
         was_derived = any(
             all(pid in sset for pid in key.split(":"))
@@ -1008,7 +1013,7 @@ def run_derive_scan(
         if was_derived:
             scores[key] = 0.0
         else:
-            scores[key] = round(score * 0.3, 3)
+            scores[key] = round(float(keep_score_map.get(key, 0.0)), 3)
 
     decisions_data["convergence_scores"] = scores
     return decisions_data
@@ -1251,15 +1256,17 @@ def run_staleness_scan(
         print("  [staleness scan] 응답에서 operations JSON을 찾을 수 없음")
         return decisions_data
 
-    # keep/update/prune만 허용
+    # keep/update/prune만 허용, keep은 new_score로 staleness_score 업데이트
     allowed_ops = [op for op in parsed["operations"] if op.get("op") in ("update", "prune")]
+    keep_ops = [op for op in parsed["operations"] if op.get("op") == "keep"]
 
     if allowed_ops:
         print(f"  [staleness scan] {len(allowed_ops)}개 operation 적용")
         decisions_data = apply_operations(decisions_data, allowed_ops, today)
 
-    # 처리된 decisions score 리셋/감소 + cooldown 갱신
+    # score 업데이트: update/prune은 0으로 리셋, keep은 LLM이 준 new_score로 설정
     operated_ids = {op.get("id") for op in allowed_ops}
+    keep_score_map = {op.get("id"): op.get("new_score", 0.0) for op in keep_ops}
     for d in decisions_data.get("decisions", []):
         d_id = d.get("id")
         if d_id not in {c["id"] for c in candidates}:
@@ -1267,8 +1274,8 @@ def run_staleness_scan(
         if d_id in operated_ids:
             d["staleness_score"] = 0.0
         else:
-            # keep — score 감소 + cooldown 시작
-            d["staleness_score"] = round(d.get("staleness_score", 0.0) * 0.3, 3)
+            new_score = keep_score_map.get(d_id, 0.0)
+            d["staleness_score"] = round(float(new_score), 3)
             d["last_reviewed_commit"] = current_commit_hash
             d["last_reviewed_processed_count"] = processed_count
 

@@ -38,8 +38,9 @@ Read each candidate decision's `reason` and `extensions`, then determine:
 
 Return the following JSON in a **```json ... ``` code block**.
 
-Include only genuine derive operations. Omit decisions that do not warrant derivation
-(their convergence score will be reduced automatically by the system).
+Include only genuine derive operations. For pairs that do not warrant derivation,
+include a `keep` operation with a `new_score` — your assessment of how much convergence
+actually exists (0.0 = no meaningful convergence, use a low value if the decisions are clearly distinct).
 
 ```json
 {
@@ -51,6 +52,11 @@ Include only genuine derive operations. Omit decisions that do not warrant deriv
       "title": "Derived higher-order principle (max 40 chars)",
       "reason": "The principle inferred from the source decisions — what they collectively reveal that none captures alone.",
       "refs": []
+    },
+    {
+      "op": "keep",
+      "pair": "d-035:d-036",
+      "new_score": 0.3
     }
   ]
 }
@@ -59,6 +65,9 @@ Include only genuine derive operations. Omit decisions that do not warrant deriv
 If no derivation is warranted:
 ```json
 {
-  "operations": []
+  "operations": [
+    {"op": "keep", "pair": "d-031:d-033", "new_score": 0.5},
+    {"op": "keep", "pair": "d-031:d-034", "new_score": 0.2}
+  ]
 }
 ```

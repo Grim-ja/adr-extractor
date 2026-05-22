@@ -48,7 +48,9 @@ Choose keep, update, or prune only.
 Return the following JSON in a **```json ... ``` code block**.
 
 Omit decisions you choose to keep — they are handled automatically.
-Include only update and prune operations.
+Include update and prune operations, and for kept decisions include a `keep` operation
+with a `new_score` — your assessment of how stale this decision actually is
+(0.0 = fully valid, use a low value if the decision is clearly still accurate).
 
 ```json
 {
@@ -62,6 +64,11 @@ Include only update and prune operations.
     {
       "op": "prune",
       "id": "d-007"
+    },
+    {
+      "op": "keep",
+      "id": "d-005",
+      "new_score": 0.5
     }
   ]
 }
@@ -70,6 +77,9 @@ Include only update and prune operations.
 If all candidates should be kept:
 ```json
 {
-  "operations": []
+  "operations": [
+    {"op": "keep", "id": "d-003", "new_score": 0.8},
+    {"op": "keep", "id": "d-007", "new_score": 0.2}
+  ]
 }
 ```
