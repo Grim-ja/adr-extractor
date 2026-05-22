@@ -50,6 +50,29 @@ ADR_END_MARKER = "<!-- adr:end -->"
 ADR_SECTION_HEADER = "## Architecture Decisions"
 ADR_MAX_BYTES = 8 * 1024
 
+# 모델별 context window (chars 기준, 보수적 추정: tokens * 3~4)
+# 한국어/CJK 혼용 시 token당 chars가 낮으므로 * 3 사용
+MODEL_CONTEXT_CHARS: dict[str, int] = {
+    "gpt-4o":                        512_000,
+    "gpt-4o-mini":                   512_000,
+    "gpt-4.1":                       4_000_000,
+    "gpt-4.1-mini":                  4_000_000,
+    "o1":                            384_000,
+    "o1-mini":                       384_000,
+    "o3":                            600_000,
+    "o3-mini":                       600_000,
+    "o4-mini":                       600_000,
+    "claude-opus-4-7":               600_000,
+    "claude-sonnet-4-6":             600_000,
+    "claude-haiku-4-5":              600_000,
+    "claude-haiku-4-5-20251001":     600_000,
+    "claude-3-5-sonnet-20241022":    600_000,
+    "claude-3-5-haiku-20241022":     600_000,
+    "claude-3-opus-20240229":        600_000,
+    "_default":                      384_000,  # 128k tokens * 3 (보수적)
+}
+PROMPT_OVERHEAD_CHARS = 8_000  # 프롬프트 템플릿 + 메타데이터 오버헤드 추정
+
 # 전역 제외 목록
 GLOBAL_EXCLUDE = [
     "*.lock", "*.sum",
@@ -1334,7 +1357,46 @@ SCOPE_META: dict[str, dict[str, str]] = {
 }
 
 
-def build_prompt(target: str, commit: dict, diff: str, existing_canonical: list) -> str:
+def _id_num(id_str: str) -> int:
+    m = re.match(r'd-(\d+)', id_str or "")
+    return int(m.group(1)) if m else 0
+
+
+def _select_decisions_for_prompt(canonical: list, diff: str, budget_chars: int) -> list:
+    """decisions를 diff 관련성 우선으로 정렬하고 budget_chars 내에서 greedy pack."""
+    # diff에서 top-level 경로 추출
+    diff_dirs: set[str] = set()
+    for line in diff.splitlines():
+        if line.startswith("diff --git "):
+            m = re.search(r' b/(.+)$', line)
+            if m:
+                parts = m.group(1).split("/")
+                diff_dirs.add(parts[0] if len(parts) > 1 else "__root__")
+
+    def relevance_key(d: dict):
+        scope_top = (d.get("scope") or "").split("/")[0]
+        related = any(f.split("/")[0] in diff_dirs for f in (d.get("related_files") or []))
+        scope_match = scope_top in diff_dirs
+        # 관련 있는 것 먼저(0), 나머지는 최신순(id 내림차순)
+        priority = 0 if (scope_match or related) else 1
+        return (priority, -_id_num(d.get("id")))
+
+    sorted_decisions = sorted(canonical, key=relevance_key)
+
+    result = []
+    used = 0
+    for d in sorted_decisions:
+        entry_chars = len(json.dumps(d, ensure_ascii=False))
+        if used + entry_chars > budget_chars:
+            break
+        result.append(d)
+        used += entry_chars
+
+    return result
+
+
+def build_prompt(target: str, commit: dict, diff: str, existing_canonical: list,
+                 decisions_budget: int = 0) -> str:
     prompt_path = PROMPT_DIR / f"{target}.md"
     global_rules_path = PROMPT_DIR / "global-rules.md"
 
@@ -1359,7 +1421,15 @@ def build_prompt(target: str, commit: dict, diff: str, existing_canonical: list)
     # 타겟 + 글로벌 룰 조합
     template = target_template + "\n\n" + global_template
 
-    canonical_summary = json.dumps(existing_canonical[:50], ensure_ascii=False, indent=2)
+    selected = (
+        _select_decisions_for_prompt(existing_canonical, diff, decisions_budget)
+        if decisions_budget > 0
+        else existing_canonical
+    )
+    if len(selected) < len(existing_canonical):
+        print(f"  decisions 컨텍스트: 총 {len(existing_canonical)}개 중 {len(selected)}개 포함"
+              f" (예산: {decisions_budget:,}자, scope 관련 우선)")
+    canonical_summary = json.dumps(selected, ensure_ascii=False, indent=2)
 
     prompt = template.replace("{{COMMIT_HASH}}", commit["hash"][:12])
     prompt = prompt.replace("{{COMMIT_SUBJECT}}", commit["subject"])
@@ -1587,6 +1657,7 @@ def process_commit(
     no_staleness_scan: bool,
     staleness_cooldown: int,
     processed_count: int,
+    decisions_budget: int = 0,
 ) -> dict:
     print(f"\n{'─'*60}")
     print(f"  커밋: {commit['hash'][:12]} | {commit['subject'][:60]}")
@@ -1612,7 +1683,7 @@ def process_commit(
         print(f"\n[diff preview]\n{diff[:500]}...\n")
 
     canonical = get_canonical_summary(decisions_data)
-    prompt = build_prompt(target, commit, diff, canonical)
+    prompt = build_prompt(target, commit, diff, canonical, decisions_budget)
 
     if verbose:
         print(f"\n[prompt length] {len(prompt):,} 자")
@@ -1785,6 +1856,12 @@ def main() -> None:
         llm_caller = lambda prompt: call_llm_cmd(prompt, args.llm_cmd)
         print(f"LLM: {args.llm_cmd}")
 
+    # decisions 컨텍스트 예산 계산
+    model_name = getattr(args, 'model', None) or "_default"
+    context_chars = MODEL_CONTEXT_CHARS.get(model_name, MODEL_CONTEXT_CHARS["_default"])
+    decisions_budget = max(10_000, context_chars - args.max_diff - PROMPT_OVERHEAD_CHARS)
+    print(f"decisions 예산: {decisions_budget:,}자 (context {context_chars:,} - diff {args.max_diff:,} - overhead {PROMPT_OVERHEAD_CHARS:,})")
+
     repo = str(Path(args.repo).expanduser().resolve())
     try:
         head = git(repo, "rev-parse", "HEAD")
@@ -1868,6 +1945,7 @@ def main() -> None:
             no_staleness_scan=args.no_staleness_scan,
             staleness_cooldown=args.staleness_cooldown,
             processed_count=processed,
+            decisions_budget=decisions_budget,
         )
 
         state["last_processed_hash"] = commit["hash"]
