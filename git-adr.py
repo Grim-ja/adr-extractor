@@ -947,7 +947,7 @@ def run_drift_scan(
     return decisions_data
 
 
-def build_derive_scan_prompt(candidates: dict, threshold: float) -> str:
+def build_derive_scan_prompt(candidates: dict, threshold: float, existing_canonical: list) -> str:
     prompt_path = PROMPT_DIR / "derive-scan.md"
     if not prompt_path.exists():
         raise FileNotFoundError(f"derive-scan.md 없음: {prompt_path}")
@@ -956,7 +956,13 @@ def build_derive_scan_prompt(candidates: dict, threshold: float) -> str:
         template = f.read()
 
     candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
-    return template.replace("{{DERIVE_CANDIDATES}}", candidates_json).replace("{{THRESHOLD}}", str(threshold))
+    existing_json = json.dumps(existing_canonical, ensure_ascii=False, indent=2)
+    return (
+        template
+        .replace("{{DERIVE_CANDIDATES}}", candidates_json)
+        .replace("{{THRESHOLD}}", str(threshold))
+        .replace("{{EXISTING_DECISIONS}}", existing_json)
+    )
 
 
 def run_derive_scan(
@@ -1009,8 +1015,14 @@ def run_derive_scan(
     # pair 정보도 같이 넘김
     pair_info = [{"pair": key, "score": score} for key, score, _, _ in valid_pairs]
 
+    candidate_ids = {d["id"] for d in candidates}
+    existing_canonical = [
+        e for e in get_canonical_summary(decisions_data)
+        if e["id"] not in candidate_ids
+    ]
+
     try:
-        prompt = build_derive_scan_prompt({"decisions": candidates, "pairs": pair_info}, threshold)
+        prompt = build_derive_scan_prompt({"decisions": candidates, "pairs": pair_info}, threshold, existing_canonical)
     except FileNotFoundError as e:
         print(f"  [derive scan] {e}", file=sys.stderr)
         return decisions_data

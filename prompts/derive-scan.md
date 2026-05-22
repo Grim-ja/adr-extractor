@@ -7,6 +7,16 @@ a deeper architectural principle that has not yet been explicitly documented.
 Analyze the provided decisions and determine whether a higher-order principle can be derived
 from their combination.
 
+# Existing Decisions (canonical summary)
+
+These decisions are already documented. **Before deriving, check whether the principle you
+are about to propose already exists here.** If a sufficiently similar derived principle exists,
+return `keep` instead of `derive`.
+
+```json
+{{EXISTING_DECISIONS}}
+```
+
 # Convergence Candidate Decisions
 
 ```json
