@@ -49,6 +49,23 @@ Do not defend an existing ADR against contradicting evidence; revise it.
 - Entity or schema field lists (these are specifications, not decisions)
 - Feature scope lists (what exists) — extract only when a deliberate scoping decision was made
 - Facts imposed by an external API — extract only the client-side architectural policy for handling them
+- Test patterns, test setup mechanics, or test code structure — do not describe how a test is written
+
+## When the diff contains test code
+
+Test code is evidence of system properties, not a subject of documentation itself.
+Do not extract how the test is written. Instead ask:
+**"What must be true about the system for this test to be necessary?"**
+
+Extract the system property the test is verifying:
+- ✗ "E2E tests use pre-cleanup blocks before creating named resources"
+- ✓ "The system enforces uniqueness constraints on named resources server-side, with no idempotent creation path"
+
+- ✗ "UI tests render the component with disabled state props"
+- ✓ "Interactive elements expose a disabled state that prevents user action while preserving visual context"
+
+- ✗ "Integration tests mock the payment provider with error responses"
+- ✓ "Payment failures are treated as recoverable errors, not fatal system faults"
 
 # Relationship to Existing Decisions
 
