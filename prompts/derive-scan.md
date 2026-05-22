@@ -40,7 +40,7 @@ Return the following JSON in a **```json ... ``` code block**.
 
 Include only genuine derive operations. For pairs that do not warrant derivation,
 include a `keep` operation with a `new_score` — your assessment of how much convergence
-actually exists (0.0 = no meaningful convergence, use a low value if the decisions are clearly distinct).
+actually exists (0.0 = no meaningful convergence at all; {{THRESHOLD}} or above = will trigger re-examination).
 
 ```json
 {

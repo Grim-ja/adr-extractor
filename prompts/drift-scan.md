@@ -36,7 +36,7 @@ Return the following JSON in a **```json ... ``` code block**.
 
 Include only decisions that require a split. For decisions that do not need splitting,
 include a `keep` operation with a `new_score` — your assessment of how much divergence
-actually exists (0.0 = no divergence, use a low value if the decision is clearly cohesive).
+actually exists (0.0 = no divergence at all; {{THRESHOLD}} or above = will trigger re-examination).
 
 ```json
 {

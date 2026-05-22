@@ -839,7 +839,7 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
 # Drift scan
 # ─────────────────────────────────────────────
 
-def build_drift_scan_prompt(candidates: list[dict]) -> str:
+def build_drift_scan_prompt(candidates: list[dict], threshold: float) -> str:
     prompt_path = PROMPT_DIR / "drift-scan.md"
     if not prompt_path.exists():
         raise FileNotFoundError(f"drift-scan.md 없음: {prompt_path}")
@@ -848,7 +848,7 @@ def build_drift_scan_prompt(candidates: list[dict]) -> str:
         template = f.read()
 
     candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
-    return template.replace("{{DRIFT_CANDIDATES}}", candidates_json)
+    return template.replace("{{DRIFT_CANDIDATES}}", candidates_json).replace("{{THRESHOLD}}", str(threshold))
 
 
 def run_drift_scan(
@@ -876,7 +876,7 @@ def run_drift_scan(
         print(f"    {c['id']} | score={c.get('divergence_score', 0):.2f} | {c['title'][:50]}")
 
     try:
-        prompt = build_drift_scan_prompt(candidates)
+        prompt = build_drift_scan_prompt(candidates, threshold)
     except FileNotFoundError as e:
         print(f"  [drift scan] {e}", file=sys.stderr)
         return decisions_data
@@ -913,7 +913,7 @@ def run_drift_scan(
     return decisions_data
 
 
-def build_derive_scan_prompt(candidates: dict) -> str:
+def build_derive_scan_prompt(candidates: dict, threshold: float) -> str:
     prompt_path = PROMPT_DIR / "derive-scan.md"
     if not prompt_path.exists():
         raise FileNotFoundError(f"derive-scan.md 없음: {prompt_path}")
@@ -922,7 +922,7 @@ def build_derive_scan_prompt(candidates: dict) -> str:
         template = f.read()
 
     candidates_json = json.dumps(candidates, ensure_ascii=False, indent=2)
-    return template.replace("{{DERIVE_CANDIDATES}}", candidates_json)
+    return template.replace("{{DERIVE_CANDIDATES}}", candidates_json).replace("{{THRESHOLD}}", str(threshold))
 
 
 def run_derive_scan(
@@ -976,7 +976,7 @@ def run_derive_scan(
     pair_info = [{"pair": key, "score": score} for key, score, _, _ in valid_pairs]
 
     try:
-        prompt = build_derive_scan_prompt({"decisions": candidates, "pairs": pair_info})
+        prompt = build_derive_scan_prompt({"decisions": candidates, "pairs": pair_info}, threshold)
     except FileNotFoundError as e:
         print(f"  [derive scan] {e}", file=sys.stderr)
         return decisions_data
@@ -1171,7 +1171,7 @@ def accumulate_staleness(
     return decisions_data
 
 
-def build_staleness_scan_prompt(candidates: list[dict], change_summaries: dict[str, list[str]]) -> str:
+def build_staleness_scan_prompt(candidates: list[dict], change_summaries: dict[str, list[str]], threshold: float) -> str:
     prompt_path = PROMPT_DIR / "staleness-scan.md"
     if not prompt_path.exists():
         raise FileNotFoundError(f"staleness-scan.md 없음: {prompt_path}")
@@ -1183,7 +1183,7 @@ def build_staleness_scan_prompt(candidates: list[dict], change_summaries: dict[s
         {"decisions": candidates, "change_summaries": change_summaries},
         ensure_ascii=False, indent=2
     )
-    return template.replace("{{STALENESS_CANDIDATES}}", payload)
+    return template.replace("{{STALENESS_CANDIDATES}}", payload).replace("{{THRESHOLD}}", str(threshold))
 
 
 def run_staleness_scan(
@@ -1240,7 +1240,7 @@ def run_staleness_scan(
             change_summaries[d["id"]] = []
 
     try:
-        prompt = build_staleness_scan_prompt(candidates, change_summaries)
+        prompt = build_staleness_scan_prompt(candidates, change_summaries, threshold)
     except FileNotFoundError as e:
         print(f"  [staleness scan] {e}", file=sys.stderr)
         return decisions_data

@@ -50,7 +50,7 @@ Return the following JSON in a **```json ... ``` code block**.
 Omit decisions you choose to keep — they are handled automatically.
 Include update and prune operations, and for kept decisions include a `keep` operation
 with a `new_score` — your assessment of how stale this decision actually is
-(0.0 = fully valid, use a low value if the decision is clearly still accurate).
+(0.0 = fully valid and current; {{THRESHOLD}} or above = will trigger re-examination).
 
 ```json
 {
