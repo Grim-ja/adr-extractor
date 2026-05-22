@@ -1388,7 +1388,7 @@ def _select_decisions_for_prompt(canonical: list, diff: str, budget_chars: int) 
     for d in sorted_decisions:
         entry_chars = len(json.dumps(d, ensure_ascii=False))
         if used + entry_chars > budget_chars:
-            break
+            continue
         result.append(d)
         used += entry_chars
 
@@ -1856,8 +1856,8 @@ def main() -> None:
         llm_caller = lambda prompt: call_llm_cmd(prompt, args.llm_cmd)
         print(f"LLM: {args.llm_cmd}")
 
-    # decisions 컨텍스트 예산 계산
-    model_name = getattr(args, 'model', None) or "_default"
+    # decisions 컨텍스트 예산 계산 — llm-cmd 사용 시 모델 불명이므로 _default 적용
+    model_name = args.model if args.api_base else "_default"
     context_chars = MODEL_CONTEXT_CHARS.get(model_name, MODEL_CONTEXT_CHARS["_default"])
     decisions_budget = max(10_000, context_chars - args.max_diff - PROMPT_OVERHEAD_CHARS)
     print(f"decisions 예산: {decisions_budget:,}자 (context {context_chars:,} - diff {args.max_diff:,} - overhead {PROMPT_OVERHEAD_CHARS:,})")
