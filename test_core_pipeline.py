@@ -22,6 +22,8 @@ matches_any = git_adr.matches_any
 truncate_diff = git_adr.truncate_diff
 get_canonical_summary = git_adr.get_canonical_summary
 accumulate_staleness = git_adr.accumulate_staleness
+_extract_sentences = git_adr._extract_sentences
+_select_decisions_for_prompt = git_adr._select_decisions_for_prompt
 
 
 TODAY = "2026-05-22"
@@ -413,12 +415,14 @@ def test_canonical_summary_excludes_superseded():
     assert "d-002" not in ids
 
 
-def test_canonical_summary_truncates_reason_at_sentence():
+def test_canonical_summary_includes_up_to_3_sentences():
+    """get_canonical_summary now extracts up to 3 sentences for richer LLM context."""
     reason = "First sentence here. Second sentence continues."
     d = make_decision("d-001", reason=reason)
     data = make_data(d)
     summary = get_canonical_summary(data)
-    assert summary[0]["summary"] == "First sentence here."
+    # With n=3 and only 2 sentences, all text is included
+    assert summary[0]["summary"] == "First sentence here. Second sentence continues."
 
 
 def test_canonical_summary_includes_extensions_count():
@@ -478,3 +482,91 @@ def test_s1_skips_superseded_source():
     result = accumulate_staleness(data, ops, "abc123", FAKE_REPO, 10)
     d001 = next(d for d in result["decisions"] if d["id"] == "d-001")
     assert d001["staleness_score"] == 0.0
+
+
+# ─── _extract_sentences ───────────────────────────────────────────────────────
+
+def test_extract_sentences_single_sentence_stays():
+    text = "Only one sentence here."
+    assert _extract_sentences(text, 3) == "Only one sentence here."
+
+
+def test_extract_sentences_exactly_3():
+    text = "First sentence. Second sentence. Third sentence. Fourth sentence."
+    result = _extract_sentences(text, 3)
+    assert result == "First sentence. Second sentence. Third sentence."
+
+
+def test_extract_sentences_fewer_than_n():
+    """When fewer than n sentence boundaries exist, return all text."""
+    text = "Only two sentences here. That is all."
+    result = _extract_sentences(text, 3)
+    assert result == text.strip()
+
+
+def test_extract_sentences_empty():
+    assert _extract_sentences("", 3) == ""
+
+
+# ─── get_canonical_summary: 3-sentence reason + related_files ────────────────
+
+def test_canonical_summary_extracts_3_sentences():
+    reason = "First sentence. Second sentence. Third sentence. Fourth is cut."
+    d = make_decision("d-001", reason=reason)
+    data = make_data(d)
+    summary = get_canonical_summary(data)
+    assert summary[0]["summary"] == "First sentence. Second sentence. Third sentence."
+
+
+def test_canonical_summary_includes_related_files_top_level():
+    d = make_decision("d-001", related_files=["src/api/routes.py", "src/auth/login.py", "infra/docker.yml"])
+    data = make_data(d)
+    summary = get_canonical_summary(data)
+    top_dirs = summary[0].get("related_files")
+    assert top_dirs is not None
+    assert set(top_dirs) == {"src", "infra"}
+
+
+def test_canonical_summary_no_related_files_omits_field():
+    d = make_decision("d-001", related_files=[])
+    data = make_data(d)
+    summary = get_canonical_summary(data)
+    assert "related_files" not in summary[0]
+
+
+# ─── _select_decisions_for_prompt: related_files ranking ─────────────────────
+
+def _make_canonical_entry(id_, scope, related_files=None, summary="Decision summary."):
+    entry = {"id": id_, "title": f"Decision {id_}", "scope": scope, "summary": summary}
+    if related_files:
+        entry["related_files"] = [f.split("/")[0] for f in related_files]
+    return entry
+
+
+def test_select_prioritizes_related_files_over_scope():
+    """related_files-based match는 scope match와 동일하게 우선순위를 받아야 함."""
+    diff = "diff --git a/src/api/routes.py b/src/api/routes.py\n+ added"
+    d_scope_match = _make_canonical_entry("d-001", scope="src", related_files=[])
+    d_related_match = _make_canonical_entry("d-002", scope="architecture", related_files=["src/api/routes.py"])
+    d_no_match = _make_canonical_entry("d-003", scope="infra", related_files=[])
+
+    budget = 10_000
+    result = _select_decisions_for_prompt([d_scope_match, d_related_match, d_no_match], diff, budget)
+    ids = [d["id"] for d in result]
+    # d-001 (scope match) and d-002 (related_files match) should both be in priority group
+    assert ids.index("d-002") < ids.index("d-003"), "related_files match should rank above no-match"
+
+
+def test_select_budget_greedy_packs_smaller_entries():
+    """budget 초과 entry는 skip하고 이후 작은 entry를 계속 포함해야 함 (continue, not break)."""
+    diff = "diff --git a/x/y.py b/x/y.py\n+ added"
+    small = _make_canonical_entry("d-001", scope="x", summary="Short.")
+    large = _make_canonical_entry("d-002", scope="x", summary="A" * 5000)
+    small2 = _make_canonical_entry("d-003", scope="x", summary="Also short.")
+
+    budget = 200
+    result = _select_decisions_for_prompt([small, large, small2], diff, budget)
+    ids = [d["id"] for d in result]
+    assert "d-001" in ids
+    assert "d-003" in ids  # should be included despite d-002 being too large
+    assert "d-002" not in ids

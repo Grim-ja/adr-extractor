@@ -1363,6 +1363,17 @@ def _id_num(id_str: str) -> int:
     return int(m.group(1)) if m else 0
 
 
+def _extract_sentences(text: str, n: int) -> str:
+    """Extract first n sentences. If fewer than n exist, returns all of text."""
+    pos = 0
+    for _ in range(n):
+        m = re.search(r'\.\s+[A-Z`]', text[pos:])
+        if not m:
+            return text.strip()
+        pos += m.start() + 1
+    return text[:pos].strip()
+
+
 def _select_decisions_for_prompt(canonical: list, diff: str, budget_chars: int) -> list:
     """decisions를 diff 관련성 우선으로 정렬하고 budget_chars 내에서 greedy pack."""
     # diff에서 top-level 경로 추출
@@ -1512,8 +1523,7 @@ def get_canonical_summary(decisions_data: dict) -> list:
         if d.get("status") != "active":
             continue
         reason = d.get("reason", "")
-        m = re.search(r'\.\s+[A-Z`]', reason)
-        summary = reason[:m.start() + 1].strip() if m else reason.strip()
+        summary = _extract_sentences(reason, 3)
         if not summary:
             summary = d.get("title", "")
 
@@ -1524,14 +1534,19 @@ def get_canonical_summary(decisions_data: dict) -> list:
             "summary": summary,
         }
 
+        # related_files top-level dirs — used by _select_decisions_for_prompt() for relevance ranking
+        related_files = d.get("related_files") or []
+        if related_files:
+            top_dirs = sorted({f.split("/")[0] for f in related_files if f})
+            entry["related_files"] = top_dirs
+
         # extensions 요약 — LLM이 중복 extend를 피할 수 있도록
         extensions = d.get("extensions", [])
         if extensions:
             entry["extensions_count"] = len(extensions)
             # 가장 최근 extension의 evidence 첫 문장만 포함
             last_evidence = extensions[-1].get("evidence", "")
-            m2 = re.search(r'\.\s+[A-Z`]', last_evidence)
-            entry["latest_extension"] = last_evidence[:m2.start() + 1].strip() if m2 else last_evidence[:120].strip()
+            entry["latest_extension"] = _extract_sentences(last_evidence, 1) or last_evidence[:120].strip()
 
         result.append(entry)
     return result
