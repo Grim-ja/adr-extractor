@@ -54,10 +54,17 @@ Do not defend an existing ADR against contradicting evidence; revise it.
 ## When the diff contains test code
 
 Test code is evidence of system properties, not a subject of documentation itself.
-Do not extract how the test is written. Instead ask:
-**"What must be true about the system for this test to be necessary?"**
+Do not extract how the test is written. Instead, abstract one level up:
 
-Extract the system property the test is verifying:
+**Ask: "What must be true about the system for this test to be necessary?"**
+Then reflect on that system property — not the test.
+
+This requires two steps:
+1. **Observe** what the test does (e.g., pre-cleanup before create, retry on conflict, mock payment error)
+2. **Abstract** to the system property the test reveals (e.g., server enforces uniqueness, payment failures are recoverable)
+
+Document only the result of step 2.
+
 - ✗ "E2E tests use pre-cleanup blocks before creating named resources"
 - ✓ "The system enforces uniqueness constraints on named resources server-side, with no idempotent creation path"
 
@@ -66,6 +73,8 @@ Extract the system property the test is verifying:
 
 - ✗ "Integration tests mock the payment provider with error responses"
 - ✓ "Payment failures are treated as recoverable errors, not fatal system faults"
+
+If the abstraction cannot be expressed as a system property independent of the test — do not extract.
 
 # Relationship to Existing Decisions
 
