@@ -1145,18 +1145,19 @@ def accumulate_staleness(
                     d["last_active_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # S1: derive/split source decisions boost
+    # Boost equals staleness threshold so one derive/split event immediately queues the source for review.
     for op in operations:
         if op.get("op") == "derive":
             for src_id in op.get("source_ids", []):
                 for d in arr:
                     if d.get("id") == src_id and d.get("status") == "active":
-                        d["staleness_score"] = round(d.get("staleness_score", 0.0) + 2.0, 3)
+                        d["staleness_score"] = round(d.get("staleness_score", 0.0) + DEFAULT_STALENESS_THRESHOLD, 3)
 
         elif op.get("op") == "split":
             src_id = op.get("source_id", "")
             for d in arr:
                 if d.get("id") == src_id and d.get("status") == "active":
-                    d["staleness_score"] = round(d.get("staleness_score", 0.0) + 2.0, 3)
+                    d["staleness_score"] = round(d.get("staleness_score", 0.0) + DEFAULT_STALENESS_THRESHOLD, 3)
 
     # S2: deleted/renamed files boost
     deleted_files = _get_deleted_renamed_files(repo, commit_hash)

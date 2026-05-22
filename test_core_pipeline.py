@@ -430,3 +430,51 @@ def test_canonical_summary_includes_extensions_count():
     data = make_data(d)
     summary = get_canonical_summary(data)
     assert summary[0]["extensions_count"] == 2
+
+
+# ─── accumulate_staleness: S1 signal ─────────────────────────────────────────
+
+FAKE_REPO = "/nonexistent/repo"  # git calls fail gracefully → S2/S4 skipped
+
+def test_s1_derive_source_reaches_threshold_immediately():
+    """derive 이벤트 1회로 S1 boost가 staleness threshold에 즉시 도달해야 함."""
+    src = make_decision("d-001")
+    data = make_data(src, scores={})
+    ops = [{"op": "derive", "source_ids": ["d-001"], "scope": "architecture",
+            "title": "Higher-order principle", "reason": "Synthesized."}]
+    result = accumulate_staleness(data, ops, "abc123", FAKE_REPO, 10)
+    d001 = next(d for d in result["decisions"] if d["id"] == "d-001")
+    assert d001["staleness_score"] >= git_adr.DEFAULT_STALENESS_THRESHOLD
+
+
+def test_s1_split_source_reaches_threshold_immediately():
+    """split 이벤트 1회로 S1 boost가 staleness threshold에 즉시 도달해야 함."""
+    src = make_decision("d-001")
+    data = make_data(src, scores={})
+    ops = [{"op": "split", "source_id": "d-001", "into": []}]
+    result = accumulate_staleness(data, ops, "abc123", FAKE_REPO, 10)
+    d001 = next(d for d in result["decisions"] if d["id"] == "d-001")
+    assert d001["staleness_score"] >= git_adr.DEFAULT_STALENESS_THRESHOLD
+
+
+def test_s1_does_not_affect_non_source_decisions():
+    """S1은 derive/split의 소스가 아닌 decisions에는 영향 없어야 함."""
+    src = make_decision("d-001")
+    bystander = make_decision("d-002", staleness_score=0.5)
+    data = make_data(src, bystander, scores={})
+    ops = [{"op": "derive", "source_ids": ["d-001"], "scope": "architecture",
+            "title": "Higher-order principle", "reason": "Synthesized."}]
+    result = accumulate_staleness(data, ops, "abc123", FAKE_REPO, 10)
+    d002 = next(d for d in result["decisions"] if d["id"] == "d-002")
+    assert d002["staleness_score"] == 0.5
+
+
+def test_s1_skips_superseded_source():
+    """이미 superseded된 소스 decision에는 S1 boost를 적용하지 않아야 함."""
+    src = make_decision("d-001", status="superseded", staleness_score=0.0)
+    data = make_data(src, scores={})
+    ops = [{"op": "derive", "source_ids": ["d-001"], "scope": "architecture",
+            "title": "New principle", "reason": "Derived."}]
+    result = accumulate_staleness(data, ops, "abc123", FAKE_REPO, 10)
+    d001 = next(d for d in result["decisions"] if d["id"] == "d-001")
+    assert d001["staleness_score"] == 0.0
