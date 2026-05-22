@@ -44,6 +44,12 @@ DEFAULT_DERIVE_THRESHOLD = 2.5
 DEFAULT_STALENESS_THRESHOLD = 3.0
 DEFAULT_STALENESS_COOLDOWN = 20  # keep 후 scan 제외 커밋 수
 
+CLAUDE_MD_FILENAME = "CLAUDE.md"
+ADR_START_MARKER = "<!-- adr:start -->"
+ADR_END_MARKER = "<!-- adr:end -->"
+ADR_SECTION_HEADER = "## Architecture Decisions"
+ADR_MAX_BYTES = 8 * 1024
+
 # 전역 제외 목록
 GLOBAL_EXCLUDE = [
     "*.lock", "*.sum",
@@ -1456,6 +1462,104 @@ def get_canonical_summary(decisions_data: dict) -> list:
 
 
 # ─────────────────────────────────────────────
+# CLAUDE.md export
+# ─────────────────────────────────────────────
+
+def _build_adr_content_block(decisions_data: dict) -> str:
+    summary = get_canonical_summary(decisions_data)
+    if not summary:
+        return "No active decisions yet."
+
+    date_map = {
+        d["id"]: d.get("documentDate", "")
+        for d in decisions_data.get("decisions", [])
+    }
+    summary.sort(
+        key=lambda item: (date_map.get(item.get("id", ""), ""), item.get("id", "")),
+        reverse=True,
+    )
+
+    full_json = json.dumps(summary, ensure_ascii=False, indent=2)
+    block = "```json\n" + full_json + "\n```"
+    if len(block.encode("utf-8")) <= ADR_MAX_BYTES:
+        return block
+
+    while summary:
+        summary.pop()
+        candidate = "```json\n" + json.dumps(summary, ensure_ascii=False, indent=2) + "\n```"
+        if len(candidate.encode("utf-8")) <= ADR_MAX_BYTES:
+            return candidate
+
+    return "No active decisions yet. (all entries exceed 8KB limit)"
+
+
+def _upsert_claude_md(claude_md_path: Path, content_block: str) -> None:
+    new_section = f"{ADR_SECTION_HEADER}\n{ADR_START_MARKER}\n{content_block}\n{ADR_END_MARKER}"
+
+    if not claude_md_path.exists():
+        claude_md_path.write_text(new_section + "\n", encoding="utf-8")
+        return
+
+    text = claude_md_path.read_text(encoding="utf-8")
+    start_pos = text.find(ADR_START_MARKER)
+    end_pos = text.find(ADR_END_MARKER)
+
+    if start_pos != -1 and end_pos != -1 and start_pos < end_pos:
+        # 마커 사이 내용 교체 (마커 포함)
+        after_end = end_pos + len(ADR_END_MARKER)
+        new_text = (
+            text[:start_pos]
+            + ADR_START_MARKER + "\n"
+            + content_block + "\n"
+            + ADR_END_MARKER
+            + text[after_end:]
+        )
+    else:
+        header_match = re.search(r'^## Architecture Decisions$', text, re.MULTILINE)
+        if header_match:
+            # 헤더는 있으나 마커 없음 — 섹션 전체를 마커로 감싸 교체
+            header_start = header_match.start()
+            content_start = header_match.end() + 1  # 헤더 뒤 \n 건너뜀
+            next_h2 = re.search(r'^## ', text[content_start:], re.MULTILINE)
+            if next_h2:
+                section_end = content_start + next_h2.start()
+                new_text = text[:header_start] + new_section + "\n" + text[section_end:]
+            else:
+                new_text = text[:header_start] + new_section + "\n"
+        else:
+            # 헤더도 마커도 없음 — 파일 끝에 추가
+            new_text = text.rstrip("\n") + "\n\n" + new_section + "\n"
+
+    claude_md_path.write_text(new_text, encoding="utf-8")
+
+
+def export_claude_md(output_dir: Path, repo_dir: Path) -> None:
+    decisions_path = output_dir / DECISIONS_FILENAME
+    if not decisions_path.exists():
+        print(f"오류: decisions.json을 찾을 수 없습니다: {decisions_path}", file=sys.stderr)
+        print("먼저 git-adr.py를 실행하여 decisions.json을 생성하세요.", file=sys.stderr)
+        sys.exit(1)
+
+    with open(decisions_path, encoding="utf-8") as f:
+        decisions_data = json.load(f)
+
+    content_block = _build_adr_content_block(decisions_data)
+    claude_md_path = repo_dir / CLAUDE_MD_FILENAME
+
+    try:
+        _upsert_claude_md(claude_md_path, content_block)
+    except PermissionError:
+        print(f"오류: {claude_md_path} 쓰기 권한이 없습니다.", file=sys.stderr)
+        print(f"힌트: chmod 644 {claude_md_path}", file=sys.stderr)
+        sys.exit(1)
+
+    active_count = sum(
+        1 for d in decisions_data.get("decisions", []) if d.get("status") == "active"
+    )
+    print(f"✓ {claude_md_path} 업데이트 완료 (active decisions: {active_count}개)")
+
+
+# ─────────────────────────────────────────────
 # 메인 파이프라인
 # ─────────────────────────────────────────────
 
@@ -1597,16 +1701,20 @@ def main() -> None:
         """),
     )
 
-    parser.add_argument("--repo", required=True, help="분석할 git 레포지터리 경로")
+    parser.add_argument("--repo", help="분석할 git 레포지터리 경로 (export 모드에서는 CWD 기본값)")
     parser.add_argument(
         "--target",
-        required=True,
         choices=["implementation", "design", "planning"],
         help="ADR 타겟 도메인",
     )
     parser.add_argument("--output", required=True, help="decisions.json 저장 디렉터리")
+    parser.add_argument(
+        "--export-claude-md",
+        action="store_true",
+        help="decisions.json → CLAUDE.md ## Architecture Decisions 섹션 upsert (LLM 불필요)",
+    )
 
-    llm_group = parser.add_mutually_exclusive_group(required=True)
+    llm_group = parser.add_mutually_exclusive_group()
     llm_group.add_argument("--api-base", help="OpenAI-compatible API base URL")
     llm_group.add_argument("--llm-cmd", help="커스텀 LLM CLI 커맨드 (stdin으로 프롬프트 주입)")
 
@@ -1648,6 +1756,18 @@ def main() -> None:
 
     output_dir = Path(args.output).expanduser().resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.export_claude_md:
+        repo_dir = Path(args.repo).expanduser().resolve() if args.repo else Path.cwd()
+        export_claude_md(output_dir, repo_dir)
+        return
+
+    if args.repo is None:
+        parser.error("--repo 는 필수입니다 (--export-claude-md 모드 외)")
+    if args.target is None:
+        parser.error("--target 는 필수입니다 (--export-claude-md 모드 외)")
+    if args.api_base is None and args.llm_cmd is None:
+        parser.error("--api-base 또는 --llm-cmd 중 하나가 필요합니다 (--export-claude-md 모드 외)")
 
     if args.api_base:
         api_key = args.api_key or os.environ.get("OPENAI_API_KEY", "")

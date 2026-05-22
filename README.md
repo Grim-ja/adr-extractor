@@ -67,6 +67,30 @@ python3 git-adr.py \
   --llm-cmd "my-llm --model claude"
 ```
 
+### Export to CLAUDE.md (Claude Code integration)
+
+After running git-adr, inject the ADR summary into your repo's `CLAUDE.md` so
+Claude Code automatically loads decision history at session start:
+
+```bash
+python3 git-adr.py \
+  --export-claude-md \
+  --output ./adr-output/ \
+  --repo /path/to/repo
+```
+
+This upserts a `## Architecture Decisions` section with `<!-- adr:start --> / <!-- adr:end -->`
+boundary markers. Re-running is safe — only the section between the markers is replaced;
+existing content in `CLAUDE.md` is preserved.
+
+The section contains `active` decisions from `decisions.json` serialized as a JSON block,
+sorted by `documentDate` descending. Total output is capped at 8 KB.
+
+> **Note (v1 limitation):** `--export-claude-md` writes a single section regardless of which
+> `--target` produced the `decisions.json`. If you run multiple targets into separate output
+> directories, export each one separately — the last write wins. Per-target marker scoping
+> is planned for v2.
+
 ### Resume after interruption
 
 ```bash
