@@ -679,10 +679,9 @@ def load_decisions(output_dir: Path) -> dict:
         for d in data.get("decisions", []):
             d.setdefault("staleness_score", 0.0)
             d.setdefault("last_active_commit", "")
-            d.setdefault("last_active_date", d.get("documentDate", ""))
-            d.setdefault("last_reviewed_commit", None)
             d.setdefault("last_reviewed_processed_count", -1)
             d.setdefault("related_churn_count", 0)
+            d.setdefault("eventDate", "")
         return data
     return {"decisions": [], "convergence_scores": {}}
 
@@ -710,13 +709,13 @@ def find_idx(arr: list, id_: str = "", scope: str = "", pat: str = "") -> int:
     return -1
 
 
-def _new_decision(counter: int, today: str, commit_date: str, op: dict, extra: Optional[dict] = None) -> dict:
+def _new_decision(counter: int, today: str, event_date: str, op: dict, extra: Optional[dict] = None) -> dict:
     """새 decision 객체 생성 헬퍼."""
     d = {
         "id": fmt_id(counter),
         "status": "active",
         "documentDate": today,
-        "commitDate": commit_date,
+        "eventDate": event_date,
         "scope": op.get("scope", ""),
         "title": op.get("title", ""),
         "reason": op.get("reason", ""),
@@ -729,8 +728,6 @@ def _new_decision(counter: int, today: str, commit_date: str, op: dict, extra: O
         "divergence_score": 0.0,
         "staleness_score": 0.0,
         "last_active_commit": "",
-        "last_active_date": today,
-        "last_reviewed_commit": None,
         "last_reviewed_processed_count": -1,
         "related_churn_count": 0,  # last_active_commit 이후 related_files 변경 커밋 수
     }
@@ -739,7 +736,7 @@ def _new_decision(counter: int, today: str, commit_date: str, op: dict, extra: O
     return d
 
 
-def apply_operations(decisions_data: dict, operations: list, today: str, commit_date: str = "") -> dict:
+def apply_operations(decisions_data: dict, operations: list, today: str, event_date: str = "") -> dict:
     arr = decisions_data.get("decisions", [])
 
     max_num = 0
@@ -755,7 +752,7 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
         op_scope = op.get("scope", "")
 
         if op_type == "add":
-            arr.append(_new_decision(counter, today, commit_date, op))
+            arr.append(_new_decision(counter, today, event_date, op))
             counter += 1
 
         elif op_type == "update":
@@ -772,14 +769,14 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                 # history에 현재 상태 저장
                 d["history"] = d.get("history", []) + [{
                     "documentDate": d.get("documentDate", d.get("date")),
-                    "commitDate": d.get("commitDate", ""),
+                    "eventDate": d.get("eventDate", ""),
                     "title": d.get("title"),
                     "reason": d.get("reason"),
                     "related_files": d.get("related_files", []),
                     "action": "updated",
                 }]
                 d["documentDate"] = today
-                d["commitDate"] = commit_date
+                d["eventDate"] = event_date
                 if new_reason:
                     d["reason"] = new_reason
                 if op.get("refs") is not None:
@@ -790,6 +787,10 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                     d["title"] = op["title"]
                 if op.get("scope"):
                     d["scope"] = op["scope"]
+                if op.get("alternatives") is not None:
+                    d["alternatives"] = op["alternatives"]
+                if op.get("consequences") is not None:
+                    d["consequences"] = op["consequences"]
 
         elif op_type == "extend":
             # 기존 reason은 보존, extensions 배열에 새 증거 추가
@@ -806,13 +807,12 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                 # extensions 배열에 추가 (reason은 변경 안 함)
                 extension_entry = {
                     "documentDate": today,
-                    "commitDate": commit_date,
+                    "eventDate": event_date,
                     "evidence": new_evidence,
                     "related_files": new_related,
                 }
                 d["extensions"] = d.get("extensions", []) + [extension_entry]
                 d["documentDate"] = today
-                d["commitDate"] = commit_date
                 # related_files는 union
                 existing = set(d.get("related_files", []))
                 for f in new_related:
@@ -825,17 +825,18 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
                 d = arr[idx]
                 d["history"] = d.get("history", []) + [{
                     "documentDate": d.get("documentDate", d.get("date")),
-                    "commitDate": d.get("commitDate", ""),
+                    "eventDate": d.get("eventDate", ""),
                     "title": d.get("title"),
                     "reason": d.get("reason"),
                     "action": "pruned",
                 }]
                 d["status"] = "superseded"
+                d["superseded_by"] = None
                 d["documentDate"] = today
-                d["commitDate"] = commit_date
+                d["eventDate"] = event_date
 
         elif op_type == "derive":
-            arr.append(_new_decision(counter, today, commit_date, op, {
+            arr.append(_new_decision(counter, today, event_date, op, {
                 "derived_from": op.get("source_ids", []),
             }))
             counter += 1
@@ -843,24 +844,26 @@ def apply_operations(decisions_data: dict, operations: list, today: str, commit_
         elif op_type == "split":
             src_id = op.get("source_id", "")
             parts = op.get("into", [])
+            new_ids = [fmt_id(counter + i) for i in range(len(parts))]
             src_found = False
             for d in arr:
                 if d.get("id") == src_id:
                     d["history"] = d.get("history", []) + [{
                         "documentDate": d.get("documentDate", d.get("date")),
-                        "commitDate": d.get("commitDate", ""),
+                        "eventDate": d.get("eventDate", ""),
                         "title": d.get("title"),
                         "reason": d.get("reason"),
                         "action": "split",
                     }]
                     d["status"] = "superseded"
+                    d["superseded_by"] = new_ids
                     d["divergence_score"] = 0.0
                     src_found = True
                     break
             if not src_found and src_id:
                 print(f"  [warn] split source_id '{src_id}' not found — parts added without superseding")
             for part in parts:
-                arr.append(_new_decision(counter, today, commit_date, part, {
+                arr.append(_new_decision(counter, today, event_date, part, {
                     "split_from": src_id,
                 }))
                 counter += 1
@@ -890,6 +893,7 @@ def run_drift_scan(
     llm_caller,
     threshold: float,
     today: str,
+    commit_hash: str = "",
 ) -> dict:
     """
     divergence_score >= threshold인 decisions를 LLM에 전달해 split 여부 판단.
@@ -933,7 +937,18 @@ def run_drift_scan(
 
     if split_ops:
         print(f"  [drift scan] split {len(split_ops)}개 적용")
-        decisions_data = apply_operations(decisions_data, split_ops, today)
+        max_id_before = max(
+            (int(re.match(r'd-(\d+)', d.get("id", "")).group(1))
+             for d in decisions_data.get("decisions", [])
+             if re.match(r'd-(\d+)', d.get("id", ""))),
+            default=0,
+        )
+        decisions_data = apply_operations(decisions_data, split_ops, today, today)
+        if commit_hash:
+            for d in decisions_data.get("decisions", []):
+                m = re.match(r'd-(\d+)', d.get("id", ""))
+                if m and int(m.group(1)) > max_id_before and not d.get("last_active_commit"):
+                    d["last_active_commit"] = commit_hash
     else:
         print(f"  [drift scan] split 없음")
 
@@ -970,6 +985,7 @@ def run_derive_scan(
     llm_caller,
     threshold: float,
     today: str,
+    commit_hash: str = "",
 ) -> dict:
     """
     convergence_score >= threshold인 decision pair들을 LLM에 전달해 derive 여부 판단.
@@ -1045,7 +1061,18 @@ def run_derive_scan(
 
     if derive_ops:
         print(f"  [derive scan] derive {len(derive_ops)}개 적용")
-        decisions_data = apply_operations(decisions_data, derive_ops, today)
+        max_id_before = max(
+            (int(re.match(r'd-(\d+)', d.get("id", "")).group(1))
+             for d in decisions_data.get("decisions", [])
+             if re.match(r'd-(\d+)', d.get("id", ""))),
+            default=0,
+        )
+        decisions_data = apply_operations(decisions_data, derive_ops, today, today)
+        if commit_hash:
+            for d in decisions_data.get("decisions", []):
+                m = re.match(r'd-(\d+)', d.get("id", ""))
+                if m and int(m.group(1)) > max_id_before and not d.get("last_active_commit"):
+                    d["last_active_commit"] = commit_hash
     else:
         print(f"  [derive scan] derive 없음")
 
@@ -1135,7 +1162,6 @@ def accumulate_staleness(
     for d in arr:
         if d.get("id") in active_ids:
             d["last_active_commit"] = commit_hash
-            d["last_active_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
             d["related_churn_count"] = 0
             d["staleness_score"] = max(0.0, d.get("staleness_score", 0.0) * 0.5)
 
@@ -1154,7 +1180,6 @@ def accumulate_staleness(
             for d in arr:
                 if d.get("id") == target_id and not d.get("last_active_commit"):
                     d["last_active_commit"] = commit_hash
-                    d["last_active_date"] = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
     # S1: derive/split source decisions boost
     # Boost equals staleness threshold so one derive/split event immediately queues the source for review.
@@ -1309,7 +1334,7 @@ def run_staleness_scan(
 
     if allowed_ops:
         print(f"  [staleness scan] {len(allowed_ops)}개 operation 적용")
-        decisions_data = apply_operations(decisions_data, allowed_ops, today)
+        decisions_data = apply_operations(decisions_data, allowed_ops, today, today)
 
     # score 업데이트: update/prune은 0으로 리셋, keep은 LLM이 준 new_score로 설정
     operated_ids = {op.get("id") for op in allowed_ops}
@@ -1323,7 +1348,6 @@ def run_staleness_scan(
         else:
             new_score = keep_score_map.get(d_id, 0.0)
             d["staleness_score"] = round(float(new_score), 3)
-            d["last_reviewed_commit"] = current_commit_hash
             d["last_reviewed_processed_count"] = processed_count
 
     return decisions_data
@@ -1746,8 +1770,8 @@ def process_commit(
     print(f"  operations ({len(operations)}): {op_summary}")
 
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    commit_date = commit["date"].split(" ")[0] if commit.get("date") else ""
-    decisions_data = apply_operations(decisions_data, operations, today, commit_date)
+    event_date = commit["date"].split(" ")[0] if commit.get("date") else ""
+    decisions_data = apply_operations(decisions_data, operations, today, event_date)
     print(f"  ✓ decisions 총 {len(decisions_data.get('decisions', []))}개")
 
     # 2. convergence score 누적
@@ -1756,11 +1780,11 @@ def process_commit(
 
     # 3. drift scan: divergence_score >= threshold → split
     if not no_drift_scan:
-        decisions_data = run_drift_scan(decisions_data, llm_caller, drift_threshold, today)
+        decisions_data = run_drift_scan(decisions_data, llm_caller, drift_threshold, today, commit["hash"])
 
     # 4. derive scan: convergence_score >= threshold → derive
     if not no_derive_scan:
-        decisions_data = run_derive_scan(decisions_data, llm_caller, derive_threshold, today)
+        decisions_data = run_derive_scan(decisions_data, llm_caller, derive_threshold, today, commit["hash"])
 
     # 5. staleness score 누적 (split/derive 결과 반영 후)
     if not no_staleness_scan:

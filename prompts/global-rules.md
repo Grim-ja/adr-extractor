@@ -126,13 +126,16 @@ or comments, prefix the `reason` field with `"Inferred:"`.
       "reason": "The strongest currently-supported explanation of why the system appears to be structured this way, based on the evidence observed so far. 2-4 sentences.",
       "alternatives": ["Alternative that was considered"],
       "consequences": ["Trade-offs of this decision"],
-      "refs": [],
+      "refs": ["External docs, design docs, RFCs, or issue links that justify this decision — only if explicitly referenced in the diff or commit message. Leave empty if none."],
       "related_files": ["File paths relevant to this decision from the diff"]
     },
     {
       "op": "update",
       "id": "d-001",
+      "title": "New title consistent with the updated reason — required if the conclusion changed",
       "reason": "The corrected or replaced explanation — use when the existing reason is wrong or incomplete",
+      "alternatives": ["Rewrite alternatives to match the updated conclusion — omit field if unchanged"],
+      "consequences": ["Rewrite consequences to match the updated conclusion — omit field if unchanged"],
       "related_files": ["relevant files"]
     },
     {
@@ -147,7 +150,7 @@ or comments, prefix the `reason` field with `"Inferred:"`.
       "scope": "architecture",
       "title": "Higher-order principle inferred from existing decisions",
       "reason": "The new principle or conclusion inferred from the source decisions",
-      "refs": []
+      "refs": ["External docs or issue links that motivated this derivation, if any"]
     },
     {
       "op": "prune",
@@ -161,14 +164,14 @@ or comments, prefix the `reason` field with `"Inferred:"`.
           "scope": "architecture",
           "title": "First separated decision",
           "reason": "Why this cluster deserves its own decision",
-          "refs": [],
+          "refs": ["External docs or issue links relevant to this cluster, if any"],
           "related_files": []
         },
         {
           "scope": "architecture",
           "title": "Second separated decision",
           "reason": "Why this cluster deserves its own decision",
-          "refs": [],
+          "refs": ["External docs or issue links relevant to this cluster, if any"],
           "related_files": []
         }
       ]

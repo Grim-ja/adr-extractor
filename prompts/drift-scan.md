@@ -51,7 +51,7 @@ actually exists (0.0 = no divergence at all; {{THRESHOLD}} or above = will trigg
           "reason": "Core rationale of this cluster",
           "alternatives": [],
           "consequences": [],
-          "refs": [],
+          "refs": ["External docs or issue links relevant to this cluster, if any"],
           "related_files": ["files relevant to this cluster"]
         },
         {
@@ -60,7 +60,7 @@ actually exists (0.0 = no divergence at all; {{THRESHOLD}} or above = will trigg
           "reason": "Core rationale of this cluster",
           "alternatives": [],
           "consequences": [],
-          "refs": [],
+          "refs": ["External docs or issue links relevant to this cluster, if any"],
           "related_files": ["files relevant to this cluster"]
         }
       ]

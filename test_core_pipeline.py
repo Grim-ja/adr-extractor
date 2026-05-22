@@ -47,7 +47,7 @@ def make_decision(
         "id": id_,
         "status": status,
         "documentDate": document_date,
-        "commitDate": COMMIT_DATE,
+        "eventDate": COMMIT_DATE,
         "scope": scope,
         "title": title,
         "reason": reason,

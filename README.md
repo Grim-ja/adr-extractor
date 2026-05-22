@@ -226,7 +226,7 @@ Run control:
       "id": "d-001",
       "status": "active",
       "documentDate": "2026-05-21",
-      "commitDate": "2026-03-11",
+      "eventDate": "2026-03-11",
       "scope": "src/infra",
       "title": "Three-layer CLI architecture (cli/domain/infra)",
       "reason": "...",

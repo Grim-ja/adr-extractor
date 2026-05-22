@@ -61,7 +61,7 @@ actually exists (0.0 = no meaningful convergence at all; {{THRESHOLD}} or above 
       "scope": "architecture/infra-normalization",
       "title": "Derived higher-order principle (max 40 chars)",
       "reason": "The principle inferred from the source decisions — what they collectively reveal that none captures alone.",
-      "refs": []
+      "refs": ["External docs or issue links that motivated this derivation, if any"]
     },
     {
       "op": "keep",
